@@ -119,11 +119,20 @@ Component Toolbar::getComponent() {
     
     // Wrap to handle keyboard navigation when menu is open
     return CatchEvent(menu_bar, [this](Event event) {
-        // Handle file input dialog
+        // Handle file input dialog - MUST be first to capture all input
         if (show_file_dialog_) {
+            // Handle all printable characters
             if (event.is_character()) {
                 file_input_ += event.character();
                 return true;
+            }
+            // Special handling for characters that might be interpreted as events
+            if (event.input().size() == 1) {
+                char c = event.input()[0];
+                if (c >= 32 && c < 127) {  // Printable ASCII
+                    file_input_ += c;
+                    return true;
+                }
             }
             if (event == Event::Backspace && !file_input_.empty()) {
                 file_input_.pop_back();
@@ -142,7 +151,7 @@ Component Toolbar::getComponent() {
                 file_input_.clear();
                 return true;
             }
-            return true;  // Consume all events when dialog is open
+            return true;  // Consume ALL events when dialog is open
         }
         
         // Handle progress dialog

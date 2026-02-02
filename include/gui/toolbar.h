@@ -39,6 +39,9 @@ public:
     void showLoadDialog();
     void showLoadProgressDialog();
     
+    // Check if toolbar has an active dialog
+    bool hasActiveDialog() const { return show_file_dialog_ || show_progress_dialog_ || menu_open_; }
+    
 private:
     void setupMenus();
     

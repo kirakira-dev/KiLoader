@@ -494,6 +494,12 @@ Component App::createMainComponent() {
     
     // Handle global keyboard events
     return CatchEvent(renderer, [&](Event event) {
+        // IMPORTANT: If toolbar has an active dialog, let it handle ALL events first
+        if (toolbar_->hasActiveDialog()) {
+            // Forward to toolbar's component - return false to let it propagate
+            return false;
+        }
+        
         // Handle command center input when focused
         if (command_focused_) {
             // Text input
