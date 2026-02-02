@@ -80,11 +80,24 @@ void Toolbar::setupMenus() {
 }
 
 Component Toolbar::getComponent() {
-    // Create buttons for each menu
+    // Create buttons for each menu with simple border style
     std::vector<Component> menu_buttons;
     
     for (size_t i = 0; i < menus_.size(); i++) {
         size_t idx = i;
+        
+        // Simple button style with border
+        auto option = ButtonOption::Simple();
+        option.transform = [this, idx](const EntryState& s) {
+            Element el = text(" " + menus_[idx].label + " ");
+            if (menu_open_ && selected_menu_ == static_cast<int>(idx)) {
+                el = el | inverted;
+            } else if (s.focused) {
+                el = el | bold;
+            }
+            return el | border;
+        };
+        
         auto btn = Button(menus_[i].label, [this, idx]() {
             if (menu_open_ && selected_menu_ == static_cast<int>(idx)) {
                 menu_open_ = false;
@@ -93,13 +106,13 @@ Component Toolbar::getComponent() {
                 menu_open_ = true;
                 selected_item_ = 0;
             }
-        }, ButtonOption::Animated(Color::Cyan));
+        }, option);
         menu_buttons.push_back(btn);
     }
     
-    // Title label (not a button, just visual)
+    // Title label with border
     auto title = Renderer([] {
-        return text(" KILOADER ") | bold | color(Color::Cyan);
+        return text(" KILOADER ") | bold | border;
     });
     
     // Combine title + buttons
@@ -244,6 +257,26 @@ Component Toolbar::getComponent() {
         
         // Dropdown navigation
         if (menu_open_) {
+            // Mouse click on dropdown items
+            if (event.is_mouse() && event.mouse().button == Mouse::Left &&
+                event.mouse().motion == Mouse::Pressed) {
+                int y = event.mouse().y;
+                // Menu bar is line 0-2 (3 lines with border), dropdown starts at line 3
+                // Inside dropdown: border top = line 3, first item = line 4, etc.
+                int item_y = y - 4;  // Offset for menu bar + dropdown border
+                if (item_y >= 0 && item_y < static_cast<int>(menus_[selected_menu_].items.size())) {
+                    auto& item = menus_[selected_menu_].items[item_y];
+                    if (!item.label.empty() && item.action) {
+                        item.action();
+                        menu_open_ = false;
+                        return true;
+                    }
+                }
+                // Click elsewhere closes menu
+                menu_open_ = false;
+                return true;
+            }
+            
             if (event == Event::ArrowDown) {
                 do {
                     selected_item_ = std::min(selected_item_ + 1, 

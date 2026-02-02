@@ -624,6 +624,20 @@ Component App::createMainComponent() {
             return false;  // Don't consume, let toolbar handle
         }
         
+        // Mouse click to focus command center (bottom area of screen)
+        if (event.is_mouse() && event.mouse().button == Mouse::Left &&
+            event.mouse().motion == Mouse::Pressed) {
+            // Command center is roughly the bottom 12 lines
+            // We use screen dimensions if available, otherwise estimate
+            int y = event.mouse().y;
+            // If click is in lower portion, focus command center
+            // This is approximate - the command center takes about 12 lines at bottom
+            if (y >= 15) {  // Rough estimate for command center area
+                command_focused_ = true;
+                return true;
+            }
+        }
+        
         return false;
     });
 }
