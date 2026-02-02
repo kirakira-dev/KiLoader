@@ -511,19 +511,31 @@ Component App::createMainComponent() {
         Element main = vbox(main_content);
         
         // Overlay: toolbar dropdown/dialogs
-        Element toolbar_overlay = toolbar_->render();
         if (toolbar_->hasActiveDialog()) {
+            Element toolbar_overlay = toolbar_->render();
+            // Wrap in a full-screen container for proper positioning
+            Element overlay_container = toolbar_overlay | flex;
             main = dbox({
                 main,
-                toolbar_overlay,
+                overlay_container,
             });
         }
         
         // Overlay: search dialog
         if (search_dialog_->isVisible()) {
+            Element search_overlay = search_dialog_->render() | clear_under;
+            Element overlay_container = vbox({
+                filler(),
+                hbox({
+                    filler(),
+                    search_overlay,
+                    filler(),
+                }),
+                filler(),
+            });
             main = dbox({
                 main,
-                search_dialog_->render() | clear_under | center,
+                overlay_container,
             });
         }
         
@@ -537,17 +549,27 @@ Component App::createMainComponent() {
             }
             
             Element loading_box = vbox({
-                text(""),
                 text(" " + loading_message_ + " ") | bold | center,
                 separator(),
                 vbox(log_lines) | size(WIDTH, EQUAL, 50),
                 separator(),
                 text(" Please wait... ") | dim | center | blink,
-            }) | border | bgcolor(Color::Black) | clear_under | center | vcenter;
+            }) | border | bgcolor(Color::Black) | clear_under;
+            
+            // Center the loading box
+            Element overlay_container = vbox({
+                filler(),
+                hbox({
+                    filler(),
+                    loading_box,
+                    filler(),
+                }),
+                filler(),
+            });
             
             main = dbox({
                 main,
-                loading_box,
+                overlay_container,
             });
         }
         

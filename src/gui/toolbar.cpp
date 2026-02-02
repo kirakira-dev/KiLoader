@@ -319,7 +319,16 @@ Element Toolbar::render() {
             text(" Enter: load | Escape: cancel ") | dim | center,
         }) | border | bgcolor(Color::Black) | clear_under;
         
-        return dialog | center | vcenter;
+        // Center using filler pattern
+        return vbox({
+            filler(),
+            hbox({
+                filler(),
+                dialog,
+                filler(),
+            }),
+            filler(),
+        });
     }
     
     // Progress selection dialog - centered overlay
@@ -344,7 +353,16 @@ Element Toolbar::render() {
             text(" Up/Down | Enter | Escape ") | dim | center,
         }) | border | bgcolor(Color::Black) | clear_under;
         
-        return dialog | center | vcenter;
+        // Center using filler pattern
+        return vbox({
+            filler(),
+            hbox({
+                filler(),
+                dialog,
+                filler(),
+            }),
+            filler(),
+        });
     }
     
     return text("");  // No overlay
