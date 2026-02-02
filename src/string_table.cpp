@@ -6,7 +6,7 @@
 
 namespace kiloader {
 
-constexpr int NUM_THREADS = 16;
+constexpr int NUM_THREADS = 32;
 
 StringTable::StringTable(NsoFile& nso) : nso_(nso) {}
 

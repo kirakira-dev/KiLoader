@@ -5,7 +5,7 @@
 
 namespace kiloader {
 
-constexpr int NUM_THREADS = 16;
+constexpr int NUM_THREADS = 32;
 
 XRefAnalyzer::XRefAnalyzer(NsoFile& nso, Disassembler& disasm, FunctionFinder& func_finder)
     : nso_(nso), disasm_(disasm), func_finder_(func_finder) {}

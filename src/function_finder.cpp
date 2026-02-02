@@ -7,7 +7,7 @@
 
 namespace kiloader {
 
-constexpr int NUM_THREADS = 16;
+constexpr int NUM_THREADS = 32;
 
 FunctionFinder::FunctionFinder(NsoFile& nso, Disassembler& disasm)
     : nso_(nso), disasm_(disasm) {}
