@@ -51,15 +51,17 @@ void Toolbar::setupMenus() {
     tools_menu.label = "Tools";
     tools_menu.items = {
         {"Search Strings", [this]() { 
-            app_.appendOutput("Use ':' then 'strings <pattern>' in Command Center");
+            app_.focusCommandCenter();
+            app_.appendOutput("Type: strings <pattern>");
         }, "/"},
-        {"Search Assembly", [this]() { 
-            app_.appendOutput("Use ':' then 'disasm <addr>' in Command Center");
-        }, ""},
         {"Go to Address", [this]() {
             app_.focusCommandCenter();
             app_.appendOutput("Type: goto <address>");
         }, ":goto"},
+        {"Disassemble", [this]() {
+            app_.focusCommandCenter();
+            app_.appendOutput("Type: disasm <address> [count]");
+        }, ":disasm"},
     };
     menus_.push_back(tools_menu);
     
@@ -78,46 +80,35 @@ void Toolbar::setupMenus() {
 }
 
 Component Toolbar::getComponent() {
-    // Build dropdown menu items for each menu
-    std::vector<Component> menu_buttons;
+    // Create button options with custom style
+    auto button_style = ButtonOption::Animated();
+    button_style.transform = [](const EntryState& s) {
+        Element el = text(" " + s.label + " ");
+        if (s.focused) {
+            el = el | inverted;
+        }
+        return el;
+    };
     
+    // Create menu bar buttons
+    std::vector<Component> buttons;
     for (size_t i = 0; i < menus_.size(); i++) {
-        // Capture the index by value
         size_t idx = i;
-        
-        // Create a button that toggles the dropdown
-        auto btn = Renderer([this, idx](bool focused) {
-            Element el = text(" " + menus_[idx].label + " ");
+        auto btn = Button(menus_[i].label, [this, idx]() {
             if (menu_open_ && selected_menu_ == static_cast<int>(idx)) {
-                el = el | inverted | bold;
-            } else if (focused) {
-                el = el | inverted;
+                menu_open_ = false;
+            } else {
+                selected_menu_ = static_cast<int>(idx);
+                menu_open_ = true;
+                selected_item_ = 0;
             }
-            return el;
-        });
-        
-        // Make it clickable
-        btn = CatchEvent(btn, [this, idx](Event event) {
-            if (event.is_mouse() && event.mouse().button == Mouse::Left && 
-                event.mouse().motion == Mouse::Pressed) {
-                if (menu_open_ && selected_menu_ == static_cast<int>(idx)) {
-                    menu_open_ = false;
-                } else {
-                    selected_menu_ = static_cast<int>(idx);
-                    menu_open_ = true;
-                    selected_item_ = 0;
-                }
-                return true;
-            }
-            return false;
-        });
-        
-        menu_buttons.push_back(btn);
+        }, button_style);
+        buttons.push_back(btn);
     }
     
-    auto menu_bar = Container::Horizontal(menu_buttons);
+    auto menu_bar = Container::Horizontal(buttons);
     
-    // Wrap to handle keyboard navigation when menu is open
+    // Wrap to handle keyboard navigation and dialogs
     return CatchEvent(menu_bar, [this](Event event) {
         // Handle file input dialog - MUST be first to capture all input
         if (show_file_dialog_) {
@@ -175,23 +166,10 @@ Component Toolbar::getComponent() {
                 selected_progress_++;
                 return true;
             }
-            // Handle mouse clicks on progress items
-            if (event.is_mouse() && event.mouse().button == Mouse::Left &&
-                event.mouse().motion == Mouse::Pressed) {
-                // Calculate which item was clicked based on y position
-                // Header + separator = 2 lines, then items start at y=2
-                int y = event.mouse().y;
-                if (y >= 3 && y - 3 < static_cast<int>(progress_list_.size())) {
-                    selected_progress_ = y - 3;
-                    app_.loadProgress(progress_list_[selected_progress_]);
-                    show_progress_dialog_ = false;
-                    return true;
-                }
-            }
             return true;
         }
         
-        // Handle open menu
+        // Handle open dropdown menu
         if (menu_open_) {
             if (event == Event::ArrowDown) {
                 // Skip separators
@@ -236,17 +214,19 @@ Component Toolbar::getComponent() {
             if (event.is_mouse() && event.mouse().button == Mouse::Left &&
                 event.mouse().motion == Mouse::Pressed) {
                 int y = event.mouse().y;
-                // Dropdown starts at y=1 (after menu bar)
-                if (y >= 2 && y - 2 < static_cast<int>(menus_[selected_menu_].items.size())) {
-                    int item_idx = y - 2;
+                // Dropdown items start at y=1 (after the menu bar line)
+                // Each item is 1 line
+                int item_idx = y - 1;
+                if (item_idx >= 0 && item_idx < static_cast<int>(menus_[selected_menu_].items.size())) {
                     auto& item = menus_[selected_menu_].items[item_idx];
                     if (!item.label.empty() && item.action) {
+                        selected_item_ = item_idx;
                         item.action();
+                        menu_open_ = false;
+                        return true;
                     }
-                    menu_open_ = false;
-                    return true;
                 }
-                // Click outside closes menu
+                // Click elsewhere closes menu
                 menu_open_ = false;
                 return true;
             }
@@ -254,25 +234,25 @@ Component Toolbar::getComponent() {
         
         // F1-F4 to open specific menus
         if (event == Event::F1) {
-            selected_menu_ = 0;  // Load
+            selected_menu_ = 0;
             menu_open_ = true;
             selected_item_ = 0;
             return true;
         }
         if (event == Event::F2) {
-            selected_menu_ = 1;  // Window
+            selected_menu_ = 1;
             menu_open_ = true;
             selected_item_ = 0;
             return true;
         }
         if (event == Event::F3) {
-            selected_menu_ = 2;  // Tools
+            selected_menu_ = 2;
             menu_open_ = true;
             selected_item_ = 0;
             return true;
         }
         if (event == Event::F4) {
-            selected_menu_ = 3;  // UI
+            selected_menu_ = 3;
             menu_open_ = true;
             selected_item_ = 0;
             return true;
@@ -290,14 +270,13 @@ Element Toolbar::render() {
         if (menu_open_ && selected_menu_ == static_cast<int>(i)) {
             btn = btn | inverted | bold;
         }
-        menu_buttons.push_back(btn);
-        menu_buttons.push_back(text(" "));
+        menu_buttons.push_back(btn | border);
     }
     
     Element toolbar = hbox({
-        text("KILOADER ") | bold | color(Color::Cyan),
-        text("| "),
+        text(" KILOADER ") | bold | color(Color::Cyan) | border,
         hbox(menu_buttons),
+        filler(),
     });
     
     // Render dropdown if open
@@ -310,7 +289,7 @@ Element Toolbar::render() {
             } else {
                 Element line = hbox({
                     text(" " + item.label) | flex,
-                    text(item.shortcut.empty() ? " " : " " + item.shortcut + " ") | dim,
+                    text(item.shortcut.empty() ? "  " : " " + item.shortcut + " ") | dim,
                 });
                 if (static_cast<int>(i) == selected_item_) {
                     line = line | inverted;
@@ -319,10 +298,10 @@ Element Toolbar::render() {
             }
         }
         
-        // Calculate dropdown position
-        int offset = 10;  // "KILOADER | "
+        // Calculate dropdown position - after "KILOADER" box and previous menu buttons
+        int offset = 12;  // " KILOADER " + borders
         for (int i = 0; i < selected_menu_; i++) {
-            offset += menus_[i].label.length() + 3;  // " label  "
+            offset += menus_[i].label.length() + 4;  // " label " + borders
         }
         
         Element dropdown = vbox(items) | border | bgcolor(Color::Black);
@@ -332,7 +311,7 @@ Element Toolbar::render() {
             hbox({
                 text(std::string(offset, ' ')),
                 dropdown,
-            }) | flex,
+            }),
         });
     }
     
@@ -342,10 +321,11 @@ Element Toolbar::render() {
             toolbar,
             separator(),
             hbox({
-                text(" Enter NSO path: ") | bold,
-                text(file_input_ + "_") | flex | bgcolor(Color::GrayDark),
+                text(" Path: ") | bold,
+                text(file_input_) | flex | bgcolor(Color::GrayDark),
+                text("_") | blink,
             }),
-            text(" Press Enter to load, Escape to cancel ") | dim,
+            text(" Enter: load | Escape: cancel ") | dim | center,
         });
     }
     
@@ -366,8 +346,9 @@ Element Toolbar::render() {
         toolbar = vbox({
             toolbar,
             separator(),
-            text(" Select saved progress (Up/Down, Enter): ") | bold,
+            text(" Select saved progress: ") | bold,
             vbox(items) | border,
+            text(" Up/Down: navigate | Enter: load | Escape: cancel ") | dim | center,
         });
     }
     
