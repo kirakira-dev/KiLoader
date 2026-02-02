@@ -288,32 +288,38 @@ Element Toolbar::render() {
             offset += menus_[i].label.length() + 4;
         }
         
-        // Return dropdown positioned at top-left with offset
-        return hbox({
-            text(std::string(offset, ' ')),
-            vbox({
-                text(""),  // One line gap for menu bar
-                text(""),
-                text(""),
-                vbox(items) | border | bgcolor(Color::Black) | clear_under,
+        // Dropdown box
+        Element dropdown = vbox(items) | border | bgcolor(Color::Black) | clear_under;
+        
+        // Position: offset from left, 3 lines down (menu bar height)
+        return vbox({
+            text(""),  // Line 1: top border of menu bar
+            text(""),  // Line 2: menu bar content  
+            text(""),  // Line 3: bottom border of menu bar
+            hbox({
+                text(std::string(offset, ' ')),
+                dropdown,
+                filler(),
             }),
+            filler(),
         });
     }
     
     // File input dialog - centered overlay
     if (show_file_dialog_) {
-        return vbox({
-            text(""),
+        Element dialog = vbox({
             text(" Load NSO File ") | bold | center,
             separator(),
             hbox({
                 text(" Path: ") | bold,
-                text(file_input_) | flex | bgcolor(Color::GrayDark),
+                text(file_input_) | bgcolor(Color::GrayDark),
                 text("_") | blink,
-            }),
+            }) | size(WIDTH, EQUAL, 50),
             separator(),
             text(" Enter: load | Escape: cancel ") | dim | center,
-        }) | border | bgcolor(Color::Black) | clear_under | center | vcenter;
+        }) | border | bgcolor(Color::Black) | clear_under;
+        
+        return dialog | center | vcenter;
     }
     
     // Progress selection dialog - centered overlay
@@ -330,14 +336,15 @@ Element Toolbar::render() {
                 items.push_back(line);
             }
         }
-        return vbox({
-            text(""),
+        Element dialog = vbox({
             text(" Load Progress ") | bold | center,
             separator(),
             vbox(items),
             separator(),
             text(" Up/Down | Enter | Escape ") | dim | center,
-        }) | border | bgcolor(Color::Black) | clear_under | center | vcenter;
+        }) | border | bgcolor(Color::Black) | clear_under;
+        
+        return dialog | center | vcenter;
     }
     
     return text("");  // No overlay
