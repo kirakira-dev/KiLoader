@@ -410,13 +410,12 @@ Component App::createMainComponent() {
         }),
     });
     
-    // Main renderer - use toolbar component directly for proper mouse handling
+    // Main renderer - toolbar component handles all its rendering internally
     auto renderer = Renderer(container, [&, toolbar_component] {
         Elements main_content;
         
-        // Toolbar - component renders buttons, render() adds dropdown/dialog overlays
+        // Toolbar - renders menu bar + dropdown/dialogs all together
         main_content.push_back(toolbar_component->Render());
-        main_content.push_back(toolbar_->render());  // Dropdowns/dialogs (empty if none)
         main_content.push_back(separator());
         
         // Main area
