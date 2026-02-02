@@ -280,22 +280,51 @@ void App::executeCommand(const std::string& cmd) {
 }
 
 bool App::loadNsoFile(const std::string& path) {
+    // Show loading overlay
+    loading_ = true;
+    loading_message_ = "Loading NSO File";
+    loading_log_.clear();
+    loading_log_.push_back("> load " + path);
+    loading_log_.push_back("Reading file...");
     setStatus("Loading " + path + "...");
     
+    // Note: This runs synchronously, so overlay won't show until after
+    // For true async loading, would need background thread
+    
     if (!analyzer_.loadNso(path)) {
+        loading_log_.push_back("ERROR: Failed to load NSO file");
+        loading_ = false;
         setStatus("Failed to load NSO file");
+        appendOutput("Failed to load: " + path);
         return false;
     }
     
     file_loaded_ = true;
+    loading_log_.push_back("NSO loaded successfully");
+    loading_log_.push_back("Build ID: " + analyzer_.getNso().getBuildId());
+    loading_log_.push_back("Analyzing functions...");
     setStatus("Analyzing...");
     
     analyzer_.analyze();
     analyzed_ = true;
     
+    auto& funcs = analyzer_.getFunctionFinder().getFunctions();
+    auto& strs = analyzer_.getStringTable().getStrings();
+    
+    loading_log_.push_back("Found " + std::to_string(funcs.size()) + " functions");
+    loading_log_.push_back("Found " + std::to_string(strs.size()) + " strings");
+    loading_log_.push_back("Analysis complete!");
+    
     function_view_->refresh();
     
-    auto& funcs = analyzer_.getFunctionFinder().getFunctions();
+    // Log to command center
+    appendOutput("> load " + path);
+    appendOutput("Build ID: " + analyzer_.getNso().getBuildId());
+    appendOutput("Functions: " + std::to_string(funcs.size()));
+    appendOutput("Strings: " + std::to_string(strs.size()));
+    appendOutput("Ready.");
+    
+    loading_ = false;
     setStatus("Loaded: " + std::to_string(funcs.size()) + " functions");
     
     return true;
@@ -481,11 +510,44 @@ Component App::createMainComponent() {
         
         Element main = vbox(main_content);
         
-        // Overlay search dialog if visible
+        // Overlay: toolbar dropdown/dialogs
+        Element toolbar_overlay = toolbar_->render();
+        if (toolbar_->hasActiveDialog()) {
+            main = dbox({
+                main,
+                toolbar_overlay,
+            });
+        }
+        
+        // Overlay: search dialog
         if (search_dialog_->isVisible()) {
             main = dbox({
                 main,
                 search_dialog_->render() | clear_under | center,
+            });
+        }
+        
+        // Overlay: loading indicator
+        if (loading_) {
+            Elements log_lines;
+            // Show last 10 log lines
+            int start = std::max(0, static_cast<int>(loading_log_.size()) - 10);
+            for (int i = start; i < static_cast<int>(loading_log_.size()); i++) {
+                log_lines.push_back(text(loading_log_[i]));
+            }
+            
+            Element loading_box = vbox({
+                text(""),
+                text(" " + loading_message_ + " ") | bold | center,
+                separator(),
+                vbox(log_lines) | size(WIDTH, EQUAL, 50),
+                separator(),
+                text(" Please wait... ") | dim | center | blink,
+            }) | border | bgcolor(Color::Black) | clear_under | center | vcenter;
+            
+            main = dbox({
+                main,
+                loading_box,
             });
         }
         

@@ -90,6 +90,11 @@ private:
     bool file_loaded_ = false;
     bool analyzed_ = false;
     
+    // Loading overlay
+    bool loading_ = false;
+    std::string loading_message_;
+    std::vector<std::string> loading_log_;
+    
     // Command center
     std::string command_input_;
     std::vector<std::string> command_output_;

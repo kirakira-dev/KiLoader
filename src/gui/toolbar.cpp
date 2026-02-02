@@ -124,76 +124,10 @@ Component Toolbar::getComponent() {
     
     auto menu_bar = Container::Horizontal(bar_components);
     
-    // Wrap with renderer that adds dropdown/dialog overlays
+    // Wrap with renderer - menu bar only, dropdowns handled separately as overlay
     auto with_overlay = Renderer(menu_bar, [this, menu_bar]() {
-        Elements content;
-        
-        // Menu bar (buttons render themselves)
-        content.push_back(menu_bar->Render());
-        
-        // Dropdown overlay
-        if (menu_open_ && selected_menu_ >= 0 && selected_menu_ < static_cast<int>(menus_.size())) {
-            Elements items;
-            for (size_t i = 0; i < menus_[selected_menu_].items.size(); i++) {
-                auto& item = menus_[selected_menu_].items[i];
-                if (item.label.empty()) {
-                    items.push_back(separatorLight());
-                } else {
-                    Element line = hbox({
-                        text(" " + item.label) | flex,
-                        text(item.shortcut.empty() ? "  " : " " + item.shortcut + " ") | dim,
-                    });
-                    if (static_cast<int>(i) == selected_item_) {
-                        line = line | inverted;
-                    }
-                    items.push_back(line);
-                }
-            }
-            
-            // Calculate offset for positioning
-            int offset = 11;  // " KILOADER " width
-            for (int i = 0; i < selected_menu_; i++) {
-                offset += menus_[i].label.length() + 4;  // Button width estimate
-            }
-            
-            content.push_back(hbox({
-                text(std::string(offset, ' ')),
-                vbox(items) | border | bgcolor(Color::Black),
-            }));
-        }
-        
-        // File input dialog
-        if (show_file_dialog_) {
-            content.push_back(separator());
-            content.push_back(hbox({
-                text(" Path: ") | bold,
-                text(file_input_) | flex | bgcolor(Color::GrayDark),
-                text("_") | blink,
-            }));
-            content.push_back(text(" Enter: load | Escape: cancel ") | dim | center);
-        }
-        
-        // Progress selection dialog
-        if (show_progress_dialog_) {
-            content.push_back(separator());
-            content.push_back(text(" Select saved progress: ") | bold);
-            Elements items;
-            if (progress_list_.empty()) {
-                items.push_back(text(" No saved progress ") | dim);
-            } else {
-                for (size_t i = 0; i < progress_list_.size(); i++) {
-                    Element line = text(" " + progress_list_[i] + " ");
-                    if (static_cast<int>(i) == selected_progress_) {
-                        line = line | inverted;
-                    }
-                    items.push_back(line);
-                }
-            }
-            content.push_back(vbox(items) | border);
-            content.push_back(text(" Up/Down | Enter | Escape ") | dim | center);
-        }
-        
-        return vbox(content);
+        // Just render the menu bar - dropdowns are overlays handled by App
+        return menu_bar->Render();
     });
     
     // Event handler
@@ -327,8 +261,86 @@ Component Toolbar::getComponent() {
 }
 
 Element Toolbar::render() {
-    // No longer used - component handles all rendering
-    return text("");
+    // Render overlay elements (dropdown menu, dialogs)
+    // These will be positioned using dbox in App
+    
+    if (menu_open_ && selected_menu_ >= 0 && selected_menu_ < static_cast<int>(menus_.size())) {
+        Elements items;
+        for (size_t i = 0; i < menus_[selected_menu_].items.size(); i++) {
+            auto& item = menus_[selected_menu_].items[i];
+            if (item.label.empty()) {
+                items.push_back(separatorLight());
+            } else {
+                Element line = hbox({
+                    text(" " + item.label) | flex,
+                    text(item.shortcut.empty() ? "  " : " " + item.shortcut + " ") | dim,
+                });
+                if (static_cast<int>(i) == selected_item_) {
+                    line = line | inverted;
+                }
+                items.push_back(line);
+            }
+        }
+        
+        // Calculate horizontal offset
+        int offset = 12;  // " KILOADER " + border
+        for (int i = 0; i < selected_menu_; i++) {
+            offset += menus_[i].label.length() + 4;
+        }
+        
+        // Return dropdown positioned at top-left with offset
+        return hbox({
+            text(std::string(offset, ' ')),
+            vbox({
+                text(""),  // One line gap for menu bar
+                text(""),
+                text(""),
+                vbox(items) | border | bgcolor(Color::Black) | clear_under,
+            }),
+        });
+    }
+    
+    // File input dialog - centered overlay
+    if (show_file_dialog_) {
+        return vbox({
+            text(""),
+            text(" Load NSO File ") | bold | center,
+            separator(),
+            hbox({
+                text(" Path: ") | bold,
+                text(file_input_) | flex | bgcolor(Color::GrayDark),
+                text("_") | blink,
+            }),
+            separator(),
+            text(" Enter: load | Escape: cancel ") | dim | center,
+        }) | border | bgcolor(Color::Black) | clear_under | center | vcenter;
+    }
+    
+    // Progress selection dialog - centered overlay
+    if (show_progress_dialog_) {
+        Elements items;
+        if (progress_list_.empty()) {
+            items.push_back(text(" No saved progress ") | dim);
+        } else {
+            for (size_t i = 0; i < progress_list_.size(); i++) {
+                Element line = text(" " + progress_list_[i] + " ");
+                if (static_cast<int>(i) == selected_progress_) {
+                    line = line | inverted;
+                }
+                items.push_back(line);
+            }
+        }
+        return vbox({
+            text(""),
+            text(" Load Progress ") | bold | center,
+            separator(),
+            vbox(items),
+            separator(),
+            text(" Up/Down | Enter | Escape ") | dim | center,
+        }) | border | bgcolor(Color::Black) | clear_under | center | vcenter;
+    }
+    
+    return text("");  // No overlay
 }
 
 void Toolbar::showLoadDialog() {
