@@ -63,12 +63,19 @@ public:
     void setStatus(const std::string& msg);
     std::string getStatus() const { return status_; }
     
+    // Command center
+    void executeCommand(const std::string& cmd);
+    void appendOutput(const std::string& text);
+    bool isCommandCenterFocused() const { return command_focused_; }
+    void focusCommandCenter() { command_focused_ = true; }
+    
     // Quit
     void quit();
     
 private:
     ftxui::Component createMainComponent();
     ftxui::Component createLayout();
+    ftxui::Element renderCommandCenter();
     
     ftxui::ScreenInteractive screen_;
     Analyzer analyzer_;
@@ -82,6 +89,14 @@ private:
     bool running_ = true;
     bool file_loaded_ = false;
     bool analyzed_ = false;
+    
+    // Command center
+    std::string command_input_;
+    std::vector<std::string> command_output_;
+    std::vector<std::string> command_history_;
+    int history_index_ = -1;
+    bool command_focused_ = false;
+    int output_scroll_ = 0;
     
     // Components
     std::shared_ptr<Toolbar> toolbar_;
