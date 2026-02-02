@@ -1,8 +1,13 @@
 #include "function_finder.h"
 #include <algorithm>
 #include <sstream>
+#include <thread>
+#include <mutex>
+#include <atomic>
 
 namespace kiloader {
+
+constexpr int NUM_THREADS = 16;
 
 FunctionFinder::FunctionFinder(NsoFile& nso, Disassembler& disasm)
     : nso_(nso), disasm_(disasm) {}
@@ -24,12 +29,38 @@ void FunctionFinder::findFunctionsByPrologue() {
     // SUB SP, SP, #0x??           (allocate stack frame)
     // STP X??, X??, [SP, #0x??]   (save callee-saved registers)
     
-    for (size_t offset = 0; offset + 4 <= size; offset += 4) {
-        if (isPrologue(code + offset, size - offset)) {
-            uint64_t addr = base + offset;
-            if (functions_.find(addr) == functions_.end()) {
-                analyzeFunction(addr);
+    // Phase 1: Find all prologue addresses in parallel
+    std::vector<std::vector<uint64_t>> thread_results(NUM_THREADS);
+    std::vector<std::thread> threads;
+    
+    size_t chunk_size = (size / 4 / NUM_THREADS + 1) * 4;  // Align to 4 bytes
+    
+    for (int t = 0; t < NUM_THREADS; t++) {
+        threads.emplace_back([&, t]() {
+            size_t start = t * chunk_size;
+            size_t end = std::min(start + chunk_size, size - 4);
+            
+            for (size_t offset = start; offset <= end; offset += 4) {
+                if (isPrologue(code + offset, size - offset)) {
+                    thread_results[t].push_back(base + offset);
+                }
             }
+        });
+    }
+    
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    
+    // Phase 2: Merge results and analyze (single-threaded to avoid races)
+    std::vector<uint64_t> all_prologues;
+    for (auto& results : thread_results) {
+        all_prologues.insert(all_prologues.end(), results.begin(), results.end());
+    }
+    
+    for (uint64_t addr : all_prologues) {
+        if (functions_.find(addr) == functions_.end()) {
+            analyzeFunction(addr);
         }
     }
 }
@@ -41,29 +72,50 @@ void FunctionFinder::findFunctionsByCallTargets() {
     size_t size = text.size;
     uint64_t base = nso_.getBaseAddress() + text.mem_offset;
     
-    std::vector<uint64_t> call_targets;
+    // Phase 1: Find all call targets in parallel
+    std::vector<std::vector<uint64_t>> thread_results(NUM_THREADS);
+    std::vector<std::thread> threads;
     
-    for (size_t offset = 0; offset + 4 <= size; offset += 4) {
-        uint32_t insn = *reinterpret_cast<const uint32_t*>(code + offset);
-        
-        // BL instruction: 0x94000000 | imm26
-        if ((insn & 0xFC000000) == 0x94000000) {
-            int32_t imm26 = insn & 0x03FFFFFF;
-            // Sign extend
-            if (imm26 & 0x02000000) {
-                imm26 |= 0xFC000000;
-            }
-            int64_t target = (base + offset) + (imm26 << 2);
+    size_t chunk_size = (size / 4 / NUM_THREADS + 1) * 4;
+    
+    for (int t = 0; t < NUM_THREADS; t++) {
+        threads.emplace_back([&, t]() {
+            size_t start = t * chunk_size;
+            size_t end = std::min(start + chunk_size, size - 4);
             
-            if (target >= static_cast<int64_t>(base) && 
-                target < static_cast<int64_t>(base + size)) {
-                call_targets.push_back(target);
+            for (size_t offset = start; offset <= end; offset += 4) {
+                uint32_t insn = *reinterpret_cast<const uint32_t*>(code + offset);
+                
+                // BL instruction: 0x94000000 | imm26
+                if ((insn & 0xFC000000) == 0x94000000) {
+                    int32_t imm26 = insn & 0x03FFFFFF;
+                    // Sign extend
+                    if (imm26 & 0x02000000) {
+                        imm26 |= 0xFC000000;
+                    }
+                    int64_t target = (base + offset) + (imm26 << 2);
+                    
+                    if (target >= static_cast<int64_t>(base) && 
+                        target < static_cast<int64_t>(base + size)) {
+                        thread_results[t].push_back(target);
+                    }
+                }
             }
-        }
+        });
     }
     
-    // Analyze each call target as a function
-    for (uint64_t target : call_targets) {
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    
+    // Phase 2: Merge and deduplicate
+    std::set<uint64_t> unique_targets;
+    for (auto& results : thread_results) {
+        unique_targets.insert(results.begin(), results.end());
+    }
+    
+    // Phase 3: Analyze each call target as a function
+    for (uint64_t target : unique_targets) {
         if (functions_.find(target) == functions_.end()) {
             analyzeFunction(target);
         }

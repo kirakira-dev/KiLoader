@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Threading support
+find_package(Threads REQUIRED)
+
 # Find required packages
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(CAPSTONE REQUIRED capstone)
@@ -46,6 +49,7 @@ add_executable(kiloader ${SOURCES})
 target_link_libraries(kiloader
     ${CAPSTONE_LIBRARIES}
     ${LZ4_LIBRARIES}
+    Threads::Threads
 )
 
 # Install

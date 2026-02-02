@@ -1,8 +1,12 @@
 #include "string_table.h"
 #include <algorithm>
 #include <cctype>
+#include <thread>
+#include <mutex>
 
 namespace kiloader {
+
+constexpr int NUM_THREADS = 16;
 
 StringTable::StringTable(NsoFile& nso) : nso_(nso) {}
 
@@ -15,41 +19,82 @@ void StringTable::findStrings(size_t min_length) {
     size_t size = rodata.size;
     uint64_t base = nso_.getBaseAddress() + rodata.mem_offset;
     
-    size_t i = 0;
-    while (i < size) {
-        // Check if this looks like a string start
-        if (!isValidStringChar(data[i])) {
-            i++;
-            continue;
-        }
-        
-        // Find string end
-        size_t start = i;
-        size_t len = 0;
-        bool valid = true;
-        
-        while (i < size && data[i] != 0) {
-            if (!isValidStringChar(data[i])) {
-                valid = false;
-                break;
-            }
-            len++;
-            i++;
-        }
-        
-        // Check if null terminated
-        if (i < size && data[i] == 0 && valid && len >= min_length) {
-            StringEntry entry;
-            entry.address = base + start;
-            entry.value = std::string(reinterpret_cast<const char*>(data + start), len);
-            entry.length = len;
-            entry.is_wide = false;
+    // Phase 1: Find strings in parallel
+    std::vector<std::vector<StringEntry>> thread_results(NUM_THREADS);
+    std::vector<std::thread> threads;
+    
+    size_t chunk_size = size / NUM_THREADS + 1;
+    
+    for (int t = 0; t < NUM_THREADS; t++) {
+        threads.emplace_back([&, t, min_length]() {
+            size_t start = t * chunk_size;
+            size_t end = std::min(start + chunk_size + 256, size);  // Overlap for strings spanning chunks
             
+            // Adjust start to avoid cutting strings (skip until null or invalid char)
+            if (t > 0 && start < size) {
+                while (start < end && data[start] != 0 && isValidStringChar(data[start])) {
+                    start++;
+                }
+                if (start < end && data[start] == 0) start++;
+            }
+            
+            size_t i = start;
+            while (i < end && i < size) {
+                if (!isValidStringChar(data[i])) {
+                    i++;
+                    continue;
+                }
+                
+                size_t str_start = i;
+                size_t len = 0;
+                bool valid = true;
+                
+                while (i < size && data[i] != 0) {
+                    if (!isValidStringChar(data[i])) {
+                        valid = false;
+                        break;
+                    }
+                    len++;
+                    i++;
+                }
+                
+                // Only add if within our chunk (avoid duplicates from overlap)
+                if (i < size && data[i] == 0 && valid && len >= min_length) {
+                    if (str_start >= t * chunk_size && str_start < (t + 1) * chunk_size) {
+                        StringEntry entry;
+                        entry.address = base + str_start;
+                        entry.value = std::string(reinterpret_cast<const char*>(data + str_start), len);
+                        entry.length = len;
+                        entry.is_wide = false;
+                        thread_results[t].push_back(std::move(entry));
+                    }
+                }
+                
+                i++;
+            }
+        });
+    }
+    
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    
+    // Phase 2: Merge results
+    for (auto& results : thread_results) {
+        for (auto& entry : results) {
             address_map_[entry.address] = strings_.size();
             strings_.push_back(std::move(entry));
         }
-        
-        i++;
+    }
+    
+    // Sort by address
+    std::sort(strings_.begin(), strings_.end(), 
+              [](const StringEntry& a, const StringEntry& b) { return a.address < b.address; });
+    
+    // Rebuild address map after sort
+    address_map_.clear();
+    for (size_t i = 0; i < strings_.size(); i++) {
+        address_map_[strings_[i].address] = i;
     }
 }
 

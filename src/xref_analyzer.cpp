@@ -1,7 +1,11 @@
 #include "xref_analyzer.h"
 #include <sstream>
+#include <thread>
+#include <mutex>
 
 namespace kiloader {
+
+constexpr int NUM_THREADS = 16;
 
 XRefAnalyzer::XRefAnalyzer(NsoFile& nso, Disassembler& disasm, FunctionFinder& func_finder)
     : nso_(nso), disasm_(disasm), func_finder_(func_finder) {}
@@ -11,10 +15,67 @@ void XRefAnalyzer::analyze() {
     refs_to_.clear();
     refs_from_.clear();
     
-    // Analyze all functions
+    // Get all function addresses
+    std::vector<uint64_t> func_addrs;
+    for (const auto& [addr, func] : func_finder_.getFunctions()) {
+        func_addrs.push_back(addr);
+    }
+    
+    // Phase 1: Analyze functions in parallel
+    std::vector<std::vector<XRef>> thread_results(NUM_THREADS);
+    std::vector<std::thread> threads;
+    
+    size_t chunk_size = func_addrs.size() / NUM_THREADS + 1;
+    
+    for (int t = 0; t < NUM_THREADS; t++) {
+        threads.emplace_back([&, t]() {
+            size_t start = t * chunk_size;
+            size_t end = std::min(start + chunk_size, func_addrs.size());
+            
+            for (size_t i = start; i < end; i++) {
+                uint64_t addr = func_addrs[i];
+                auto* func = func_finder_.getFunction(addr);
+                if (!func) continue;
+                
+                for (const auto& insn : func->instructions) {
+                    // Inline the analysis to avoid race conditions
+                    XRef xref;
+                    xref.from_address = insn.address;
+                    xref.from_function = addr;
+                    xref.from_function_name = func->name;
+                    
+                    if (insn.is_call && insn.branch_target != 0) {
+                        xref.to_address = insn.branch_target;
+                        xref.type = XRefType::Call;
+                        xref.description = "function call";
+                        thread_results[t].push_back(xref);
+                    }
+                    else if (insn.is_branch && insn.branch_target != 0) {
+                        xref.to_address = insn.branch_target;
+                        xref.type = XRefType::Jump;
+                        xref.description = "branch";
+                        thread_results[t].push_back(xref);
+                    }
+                }
+            }
+        });
+    }
+    
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    
+    // Phase 2: Merge results
+    for (auto& results : thread_results) {
+        xrefs_.insert(xrefs_.end(), results.begin(), results.end());
+    }
+    
+    // Phase 3: Analyze ADRP sequences (needs memory access, do sequentially)
     for (const auto& [addr, func] : func_finder_.getFunctions()) {
         for (const auto& insn : func.instructions) {
-            analyzeInstruction(insn, addr);
+            if (insn.mnemonic == "adrp") {
+                analyzeAdrpSequence(insn.address);
+            }
         }
     }
     
