@@ -17,16 +17,16 @@ KILOADER - Nintendo Switch NSO Analyzer
 Usage: kiloader [options] [file.nso]
 
 Options:
-  --gui           Launch graphical terminal UI
+  --cli           Use command-line interface instead of GUI
   -a              Auto-analyze after loading
   -h, --help      Show this help
 
 Examples:
-  kiloader                     # Interactive CLI mode
-  kiloader main.nso            # Load NSO and enter CLI mode
-  kiloader main.nso -a         # Load, analyze, and enter CLI mode
-  kiloader --gui               # Launch GUI mode
-  kiloader --gui main.nso      # Launch GUI and load NSO
+  kiloader                     # Launch GUI mode (default)
+  kiloader main.nso            # Launch GUI and load NSO
+  kiloader --cli               # Interactive CLI mode
+  kiloader --cli main.nso      # Load NSO and enter CLI mode
+  kiloader --cli main.nso -a   # Load, analyze, and enter CLI mode
 
 )";
 }
@@ -135,15 +135,17 @@ uint64_t parseAddressOrName(const std::string& s) {
 
 int main(int argc, char* argv[]) {
     // Parse command line arguments
-    bool gui_mode = false;
+    bool cli_mode = false;
     bool auto_analyze = false;
     std::string nso_path;
     
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         
-        if (arg == "--gui" || arg == "-g") {
-            gui_mode = true;
+        if (arg == "--cli" || arg == "-c") {
+            cli_mode = true;
+        } else if (arg == "--gui" || arg == "-g") {
+            cli_mode = false;  // Explicit GUI (though it's default)
         } else if (arg == "-a") {
             auto_analyze = true;
         } else if (arg == "-h" || arg == "--help") {
@@ -154,8 +156,8 @@ int main(int argc, char* argv[]) {
         }
     }
     
-    // GUI Mode
-    if (gui_mode) {
+    // GUI Mode (default)
+    if (!cli_mode) {
         gui::App app;
         
         if (!nso_path.empty()) {
@@ -184,7 +186,7 @@ int main(int argc, char* argv[]) {
         }
     }
     
-    std::cout << "\nType 'help' for commands. Use --gui for graphical mode.\n\n";
+    std::cout << "\nType 'help' for commands. Run without --cli for GUI mode.\n\n";
     
     std::string line;
     while (true) {
