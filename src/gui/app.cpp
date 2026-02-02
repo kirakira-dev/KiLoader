@@ -475,7 +475,7 @@ Component App::createMainComponent() {
             hbox({
                 text(" " + status_ + " ") | flex,
                 separator(),
-                text(" : Focus Command | Ctrl+Q: Quit | Tab: Switch "),
+                text(" F1-F4:Menus | : Command | Ctrl+Q:Quit "),
             })
         );
         
@@ -610,6 +610,12 @@ Component App::createMainComponent() {
                 search_dialog_->hide();
                 return true;
             }
+        }
+        
+        // Let F1-F4 through to toolbar for menu access
+        if (event == Event::F1 || event == Event::F2 || 
+            event == Event::F3 || event == Event::F4) {
+            return false;  // Don't consume, let toolbar handle
         }
         
         return false;
