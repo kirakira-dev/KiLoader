@@ -91,6 +91,8 @@ bool NsoFile::load(const std::string& path) {
         std::memcpy(data_.data.data(), raw_data_.data() + header_.data.file_offset, header_.data.size);
     }
     
+    loaded_ = true;
+    file_path_ = path;
     return true;
 }
 

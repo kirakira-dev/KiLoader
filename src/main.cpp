@@ -1,10 +1,35 @@
 #include "analyzer.h"
+#include "gui/app.h"
+#include "progress_manager.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <cstring>
 
 using namespace kiloader;
+
+void printUsage() {
+    std::cout << R"(
+KILOADER - Nintendo Switch NSO Analyzer
+========================================
+
+Usage: kiloader [options] [file.nso]
+
+Options:
+  --gui           Launch graphical terminal UI
+  -a              Auto-analyze after loading
+  -h, --help      Show this help
+
+Examples:
+  kiloader                     # Interactive CLI mode
+  kiloader main.nso            # Load NSO and enter CLI mode
+  kiloader main.nso -a         # Load, analyze, and enter CLI mode
+  kiloader --gui               # Launch GUI mode
+  kiloader --gui main.nso      # Launch GUI and load NSO
+
+)";
+}
 
 void printHelp() {
     std::cout << R"(
@@ -14,6 +39,7 @@ KILOADER - Nintendo Switch NSO Analyzer
 Commands:
   load <path>           Load an NSO file
   analyze               Run full analysis (functions, strings, xrefs)
+  save                  Save analysis progress
   
   disasm <addr> [n]     Disassemble n instructions at address
   func <addr|name>      Show function at address or by name (e.g. FUN_7104e53010)
@@ -108,24 +134,57 @@ uint64_t parseAddressOrName(const std::string& s) {
 }
 
 int main(int argc, char* argv[]) {
+    // Parse command line arguments
+    bool gui_mode = false;
+    bool auto_analyze = false;
+    std::string nso_path;
+    
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        
+        if (arg == "--gui" || arg == "-g") {
+            gui_mode = true;
+        } else if (arg == "-a") {
+            auto_analyze = true;
+        } else if (arg == "-h" || arg == "--help") {
+            printUsage();
+            return 0;
+        } else if (arg[0] != '-') {
+            nso_path = arg;
+        }
+    }
+    
+    // GUI Mode
+    if (gui_mode) {
+        gui::App app;
+        
+        if (!nso_path.empty()) {
+            app.loadNsoFile(nso_path);
+        }
+        
+        app.run();
+        return 0;
+    }
+    
+    // CLI Mode
     std::cout << "KILOADER - Nintendo Switch NSO Analyzer\n";
     std::cout << "========================================\n\n";
     
     Analyzer analyzer;
     
-    // If path provided as argument, load it
-    if (argc > 1) {
-        if (!analyzer.loadNso(argv[1])) {
+    // If path provided, load it
+    if (!nso_path.empty()) {
+        if (!analyzer.loadNso(nso_path)) {
             return 1;
         }
         
         // Auto-analyze if -a flag
-        if (argc > 2 && std::string(argv[2]) == "-a") {
+        if (auto_analyze) {
             analyzer.analyze();
         }
     }
     
-    std::cout << "\nType 'help' for commands.\n\n";
+    std::cout << "\nType 'help' for commands. Use --gui for graphical mode.\n\n";
     
     std::string line;
     while (true) {
@@ -427,6 +486,16 @@ int main(int argc, char* argv[]) {
         
         if (cmd == "strcount") {
             std::cout << "Strings: " << analyzer.getStringTable().getStrings().size() << "\n";
+            continue;
+        }
+        
+        if (cmd == "save") {
+            ProgressManager pm;
+            if (pm.saveProgress(analyzer)) {
+                std::cout << "Progress saved to: " << pm.getProgressDir(analyzer.getNso().getBuildId()) << "\n";
+            } else {
+                std::cout << "Failed to save: " << pm.getError() << "\n";
+            }
             continue;
         }
         

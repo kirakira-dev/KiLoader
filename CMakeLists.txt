@@ -8,6 +8,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Threading support
 find_package(Threads REQUIRED)
 
+# Fetch FTXUI for terminal GUI
+include(FetchContent)
+FetchContent_Declare(
+    ftxui
+    GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI.git
+    GIT_TAG v5.0.0
+)
+FetchContent_MakeAvailable(ftxui)
+
 # Find required packages
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(CAPSTONE REQUIRED capstone)
@@ -40,6 +49,13 @@ set(SOURCES
     src/xref_analyzer.cpp
     src/pseudocode.cpp
     src/string_table.cpp
+    src/progress_manager.cpp
+    src/gui/app.cpp
+    src/gui/toolbar.cpp
+    src/gui/function_view.cpp
+    src/gui/pseudo_view.cpp
+    src/gui/disasm_view.cpp
+    src/gui/search_dialog.cpp
 )
 
 # Create executable
@@ -50,6 +66,9 @@ target_link_libraries(kiloader
     ${CAPSTONE_LIBRARIES}
     ${LZ4_LIBRARIES}
     Threads::Threads
+    ftxui::screen
+    ftxui::dom
+    ftxui::component
 )
 
 # Install

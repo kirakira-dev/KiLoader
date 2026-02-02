@@ -80,6 +80,12 @@ public:
     // Load NSO from file
     bool load(const std::string& path);
     
+    // Check if loaded
+    bool isLoaded() const { return loaded_; }
+    
+    // Get loaded file path
+    const std::string& getFilePath() const { return file_path_; }
+    
     // Get segments
     const Segment& getTextSegment() const { return text_; }
     const Segment& getRodataSegment() const { return rodata_; }
@@ -114,6 +120,8 @@ private:
     Segment data_;
     uint64_t base_address_ = 0x7100000000;  // Default Switch base
     std::vector<uint8_t> raw_data_;
+    bool loaded_ = false;
+    std::string file_path_;
 };
 
 } // namespace kiloader
