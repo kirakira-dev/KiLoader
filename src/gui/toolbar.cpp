@@ -102,10 +102,12 @@ void Toolbar::draw(WINDOW* win) {
     }
     wattroff(win, A_REVERSE);
     
-    // Draw dropdown if open
-    if (menu_open_) {
-        showDropdown(selected_menu_);
-    }
+    // Note: dropdown is drawn separately via drawDropdown() to ensure it's on top
+}
+
+void Toolbar::drawDropdown() {
+    if (!menu_open_) return;
+    showDropdown(selected_menu_);
 }
 
 void Toolbar::showDropdown(int menu_idx) {

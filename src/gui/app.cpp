@@ -262,7 +262,7 @@ void App::refreshAll() {
     werase(cmd_win_);
     werase(status_win_);
     
-    // Draw menu bar
+    // Draw menu bar (without dropdown - we'll draw that last)
     toolbar_->draw(menu_win_);
     
     // Draw function list
@@ -286,16 +286,20 @@ void App::refreshAll() {
     // Draw status bar
     drawStatusBar();
     
-    // Refresh all windows
+    // Refresh all windows FIRST
     wrefresh(menu_win_);
     wrefresh(func_win_);
     wrefresh(content_win_);
     wrefresh(cmd_win_);
     wrefresh(status_win_);
     
+    // Draw dropdown LAST so it's on top
+    if (toolbar_->isMenuOpen()) {
+        toolbar_->drawDropdown();
+    }
+    
     // Position cursor if in command mode
     if (command_focused_) {
-        int cmd_y = height_ - 10;
         wmove(cmd_win_, 8, 3 + command_input_.length());
         wrefresh(cmd_win_);
     }

@@ -27,6 +27,7 @@ public:
     ~Toolbar();
     
     void draw(WINDOW* win);
+    void drawDropdown();  // Draw dropdown overlay (call after other windows)
     void handleKey(int ch);
     
     bool isMenuOpen() const { return menu_open_; }
