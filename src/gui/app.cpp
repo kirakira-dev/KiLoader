@@ -5,305 +5,339 @@
 #include "gui/disasm_view.h"
 #include "gui/search_dialog.h"
 
-#include "ftxui/component/component.hpp"
-#include "ftxui/component/event.hpp"
-#include "ftxui/dom/elements.hpp"
-
-#include <iostream>
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <cstring>
 
 namespace kiloader {
 namespace gui {
 
-using namespace ftxui;
-
-App::App() : screen_(ScreenInteractive::Fullscreen()) {
-    toolbar_ = std::make_shared<Toolbar>(*this);
-    function_view_ = std::make_shared<FunctionView>(*this);
-    pseudo_view_ = std::make_shared<PseudoView>(*this);
-    disasm_view_ = std::make_shared<DisasmView>(*this);
-    search_dialog_ = std::make_shared<SearchDialog>(*this);
+App::App() {
+    initNcurses();
+    createWindows();
     
-    // Welcome message
-    command_output_.push_back("KILOADER Command Center - Type 'help' for commands");
+    toolbar_ = std::make_unique<Toolbar>(*this);
+    function_view_ = std::make_unique<FunctionView>(*this);
+    pseudo_view_ = std::make_unique<PseudoView>(*this);
+    disasm_view_ = std::make_unique<DisasmView>(*this);
+    search_dialog_ = std::make_unique<SearchDialog>(*this);
+    
+    command_output_.push_back("KILOADER - Type ':' for command mode, F1-F4 for menus");
     command_output_.push_back("");
 }
 
-App::~App() = default;
+App::~App() {
+    destroyWindows();
+    cleanupNcurses();
+}
+
+void App::initNcurses() {
+    initscr();
+    start_color();
+    use_default_colors();
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+    mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
+    curs_set(0);  // Hide cursor
+    
+    // Define color pairs
+    init_pair(1, COLOR_CYAN, -1);     // Title
+    init_pair(2, COLOR_GREEN, -1);    // Highlighted
+    init_pair(3, COLOR_YELLOW, -1);   // Commands
+    init_pair(4, COLOR_WHITE, COLOR_BLUE);  // Menu bar
+    init_pair(5, COLOR_BLACK, COLOR_WHITE); // Selected
+    init_pair(6, COLOR_RED, -1);      // Error
+    
+    getmaxyx(stdscr, height_, width_);
+}
+
+void App::cleanupNcurses() {
+    endwin();
+}
+
+void App::createWindows() {
+    // Menu bar at top (1 line)
+    menu_win_ = newwin(1, width_, 0, 0);
+    keypad(menu_win_, TRUE);
+    
+    // Calculate layout
+    int func_width = 35;
+    int content_height = height_ - 1 - 10 - 1;  // menu, cmd, status
+    int cmd_height = 10;
+    
+    // Function list (left panel)
+    func_win_ = newwin(content_height, func_width, 1, 0);
+    keypad(func_win_, TRUE);
+    
+    // Content area (right panel)
+    content_win_ = newwin(content_height, width_ - func_width, 1, func_width);
+    keypad(content_win_, TRUE);
+    
+    // Command center
+    cmd_win_ = newwin(cmd_height, width_, 1 + content_height, 0);
+    keypad(cmd_win_, TRUE);
+    
+    // Status bar
+    status_win_ = newwin(1, width_, height_ - 1, 0);
+}
+
+void App::destroyWindows() {
+    if (menu_win_) delwin(menu_win_);
+    if (func_win_) delwin(func_win_);
+    if (content_win_) delwin(content_win_);
+    if (cmd_win_) delwin(cmd_win_);
+    if (status_win_) delwin(status_win_);
+}
+
+void App::handleResize() {
+    getmaxyx(stdscr, height_, width_);
+    destroyWindows();
+    createWindows();
+    refreshAll();
+}
 
 void App::run() {
-    auto component = createMainComponent();
-    screen_.Loop(component);
+    refreshAll();
+    
+    while (running_) {
+        int ch = getch();
+        
+        if (ch == KEY_RESIZE) {
+            handleResize();
+            continue;
+        }
+        
+        handleInput(ch);
+        refreshAll();
+    }
 }
 
-void App::appendOutput(const std::string& text) {
-    // Split by newlines
-    std::istringstream stream(text);
-    std::string line;
-    while (std::getline(stream, line)) {
-        command_output_.push_back(line);
-    }
-    // Keep last 500 lines
-    while (command_output_.size() > 500) {
-        command_output_.erase(command_output_.begin());
-    }
-    // Scroll to bottom
-    output_scroll_ = std::max(0, static_cast<int>(command_output_.size()) - 8);
-}
-
-void App::executeCommand(const std::string& cmd) {
-    if (cmd.empty()) return;
-    
-    // Add to history
-    command_history_.push_back(cmd);
-    history_index_ = -1;
-    
-    // Echo command
-    appendOutput("> " + cmd);
-    
-    // Parse command
-    std::istringstream iss(cmd);
-    std::string command;
-    iss >> command;
-    std::transform(command.begin(), command.end(), command.begin(), ::tolower);
-    
-    // Help
-    if (command == "help" || command == "h" || command == "?") {
-        appendOutput("Commands:");
-        appendOutput("  load <path>        Load NSO file");
-        appendOutput("  analyze            Run full analysis");
-        appendOutput("  save               Save analysis progress");
-        appendOutput("  disasm <addr> [n]  Disassemble at address");
-        appendOutput("  func <addr>        Show function info");
-        appendOutput("  goto <addr>        Go to address/function");
-        appendOutput("  strings <pattern>  Search strings");
-        appendOutput("  info               Show loaded file info");
-        appendOutput("  clear              Clear output");
-        appendOutput("  quit               Exit application");
-        return;
-    }
-    
-    // Clear
-    if (command == "clear" || command == "cls") {
-        command_output_.clear();
-        output_scroll_ = 0;
-        return;
-    }
-    
-    // Quit
-    if (command == "quit" || command == "exit" || command == "q") {
-        quit();
-        return;
-    }
-    
-    // Load
-    if (command == "load") {
-        std::string path;
-        std::getline(iss >> std::ws, path);
-        if (path.empty()) {
-            appendOutput("Usage: load <path>");
-            return;
-        }
-        if (loadNsoFile(path)) {
-            appendOutput("Loaded successfully");
-        }
-        return;
-    }
-    
-    // Analyze
-    if (command == "analyze") {
-        if (!file_loaded_) {
-            appendOutput("No file loaded");
-            return;
-        }
-        appendOutput("Analyzing...");
-        analyzer_.analyze();
-        analyzed_ = true;
-        function_view_->refresh();
-        appendOutput("Analysis complete: " + 
-            std::to_string(analyzer_.getFunctionFinder().getFunctions().size()) + " functions");
-        return;
-    }
-    
-    // Save
-    if (command == "save") {
-        if (saveProgress()) {
-            appendOutput("Progress saved");
-        }
-        return;
-    }
-    
-    // Info
-    if (command == "info") {
-        if (!file_loaded_) {
-            appendOutput("No file loaded");
-            return;
-        }
-        appendOutput("Build ID: " + analyzer_.getNso().getBuildId());
-        appendOutput("Text size: 0x" + 
-            ([](size_t s) { std::stringstream ss; ss << std::hex << s; return ss.str(); })
-            (analyzer_.getNso().getTextSegment().size));
-        appendOutput("Functions: " + std::to_string(analyzer_.getFunctionFinder().getFunctions().size()));
-        appendOutput("Strings: " + std::to_string(analyzer_.getStringTable().getStrings().size()));
-        return;
-    }
-    
-    // Goto
-    if (command == "goto" || command == "go" || command == "g") {
-        std::string addr_str;
-        iss >> addr_str;
-        if (addr_str.empty()) {
-            appendOutput("Usage: goto <address>");
-            return;
-        }
-        
-        uint64_t addr = 0;
-        // Parse FUN_ prefix
-        std::string upper = addr_str;
-        std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
-        if (upper.substr(0, 4) == "FUN_" || upper.substr(0, 4) == "SUB_") {
-            std::stringstream ss;
-            ss << std::hex << addr_str.substr(4);
-            ss >> addr;
-        } else if (addr_str.substr(0, 2) == "0x" || addr_str.substr(0, 2) == "0X") {
-            std::stringstream ss;
-            ss << std::hex << addr_str.substr(2);
-            ss >> addr;
-        } else {
-            addr = std::stoull(addr_str);
-        }
-        
-        setSelectedFunction(addr);
-        std::stringstream ss;
-        ss << "Jumped to 0x" << std::hex << addr;
-        appendOutput(ss.str());
-        return;
-    }
-    
-    // Disasm
-    if (command == "disasm" || command == "d") {
-        std::string addr_str;
-        size_t count = 10;
-        iss >> addr_str >> count;
-        
-        if (addr_str.empty()) {
-            appendOutput("Usage: disasm <address> [count]");
-            return;
-        }
-        
-        uint64_t addr = 0;
-        if (addr_str.substr(0, 2) == "0x" || addr_str.substr(0, 2) == "0X") {
-            std::stringstream ss;
-            ss << std::hex << addr_str.substr(2);
-            ss >> addr;
-        } else {
-            addr = std::stoull(addr_str);
-        }
-        
-        auto insns = analyzer_.disassembleAt(addr, count);
-        for (const auto& insn : insns) {
-            std::stringstream ss;
-            ss << std::hex << std::setfill('0') << std::setw(10) << insn.address;
-            ss << "  " << insn.mnemonic << " " << insn.operands;
-            appendOutput(ss.str());
-        }
-        return;
-    }
-    
-    // Func
-    if (command == "func" || command == "f") {
-        std::string addr_str;
-        iss >> addr_str;
-        
-        if (addr_str.empty()) {
-            appendOutput("Usage: func <address>");
-            return;
-        }
-        
-        uint64_t addr = 0;
-        if (addr_str.substr(0, 2) == "0x" || addr_str.substr(0, 2) == "0X") {
-            std::stringstream ss;
-            ss << std::hex << addr_str.substr(2);
-            ss >> addr;
-        } else {
-            addr = std::stoull(addr_str);
-        }
-        
-        auto* func = analyzer_.getFunctionAt(addr);
-        if (func) {
-            appendOutput("Function: " + func->name);
-            std::stringstream ss;
-            ss << "Address: 0x" << std::hex << func->address;
-            appendOutput(ss.str());
-            appendOutput("Size: " + std::to_string(func->size) + " bytes");
-            appendOutput("Leaf: " + std::string(func->is_leaf ? "yes" : "no"));
-        } else {
-            appendOutput("No function at address");
-        }
-        return;
-    }
-    
-    // Strings
-    if (command == "strings" || command == "s") {
-        std::string pattern;
-        std::getline(iss >> std::ws, pattern);
-        
-        if (pattern.empty()) {
-            appendOutput("Usage: strings <pattern>");
-            return;
-        }
-        
-        auto results = analyzer_.searchStrings(pattern);
-        appendOutput("Found " + std::to_string(results.size()) + " strings:");
-        int shown = 0;
-        for (const auto& entry : results) {
-            std::stringstream ss;
-            ss << "  0x" << std::hex << entry.address << ": ";
-            std::string val = entry.value;
-            if (val.length() > 50) val = val.substr(0, 47) + "...";
-            for (char& c : val) {
-                if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+void App::handleInput(int ch) {
+    // Handle command center input
+    if (command_focused_) {
+        if (ch == 27) {  // ESC
+            command_focused_ = false;
+            curs_set(0);
+        } else if (ch == '\n' || ch == KEY_ENTER) {
+            if (!command_input_.empty()) {
+                executeCommand(command_input_);
+                command_history_.push_back(command_input_);
+                command_input_.clear();
+                history_index_ = -1;
             }
-            ss << val;
-            appendOutput(ss.str());
-            if (++shown >= 20) {
-                appendOutput("  ... and " + std::to_string(results.size() - 20) + " more");
-                break;
+        } else if (ch == KEY_BACKSPACE || ch == 127) {
+            if (!command_input_.empty()) {
+                command_input_.pop_back();
+            }
+        } else if (ch == KEY_UP && !command_history_.empty()) {
+            if (history_index_ < 0) {
+                history_index_ = command_history_.size() - 1;
+            } else if (history_index_ > 0) {
+                history_index_--;
+            }
+            command_input_ = command_history_[history_index_];
+        } else if (ch == KEY_DOWN && !command_history_.empty()) {
+            if (history_index_ >= 0) {
+                history_index_++;
+                if (history_index_ >= static_cast<int>(command_history_.size())) {
+                    history_index_ = -1;
+                    command_input_.clear();
+                } else {
+                    command_input_ = command_history_[history_index_];
+                }
+            }
+        } else if (ch >= 32 && ch < 127) {
+            command_input_ += static_cast<char>(ch);
+        } else if (ch == '\t') {
+            command_focused_ = false;
+            curs_set(0);
+            focus_ = 1;
+        }
+        return;
+    }
+    
+    // Global keys
+    if (ch == ':') {
+        command_focused_ = true;
+        command_input_.clear();
+        curs_set(1);
+        return;
+    }
+    
+    if (ch == 'q' || ch == 'Q') {
+        running_ = false;
+        return;
+    }
+    
+    // F-keys for menus
+    if (ch == KEY_F(1) || ch == KEY_F(2) || ch == KEY_F(3) || ch == KEY_F(4)) {
+        toolbar_->handleKey(ch);
+        return;
+    }
+    
+    // Tab to switch focus
+    if (ch == '\t') {
+        focus_ = (focus_ + 1) % 4;
+        if (focus_ == 3) {
+            command_focused_ = true;
+            curs_set(1);
+        }
+        return;
+    }
+    
+    // Mouse
+    if (ch == KEY_MOUSE) {
+        MEVENT event;
+        if (getmouse(&event) == OK) {
+            // Determine which window was clicked
+            if (event.y == 0) {
+                // Menu bar
+                focus_ = 0;
+            } else if (event.y < height_ - 11) {
+                if (event.x < 35) {
+                    focus_ = 1;  // Functions
+                } else {
+                    focus_ = 2;  // Content
+                }
+            } else if (event.y < height_ - 1) {
+                focus_ = 3;  // Command
+                command_focused_ = true;
+                curs_set(1);
+            }
+            
+            // Forward to appropriate component
+            if (focus_ == 1) {
+                function_view_->handleMouse(event);
             }
         }
         return;
     }
     
-    appendOutput("Unknown command: " + command + ". Type 'help' for commands.");
+    // Forward to focused component
+    switch (focus_) {
+        case 0:
+            toolbar_->handleKey(ch);
+            break;
+        case 1:
+            function_view_->handleKey(ch);
+            break;
+        case 2:
+            if (window_state_.show_pseudo) {
+                pseudo_view_->handleKey(ch);
+            } else if (window_state_.show_disasm) {
+                disasm_view_->handleKey(ch);
+            }
+            break;
+    }
+}
+
+void App::refreshAll() {
+    // Clear and redraw all windows
+    werase(menu_win_);
+    werase(func_win_);
+    werase(content_win_);
+    werase(cmd_win_);
+    werase(status_win_);
+    
+    // Draw menu bar
+    toolbar_->draw(menu_win_);
+    
+    // Draw function list
+    box(func_win_, 0, 0);
+    mvwprintw(func_win_, 0, 2, " Functions ");
+    function_view_->draw(func_win_);
+    
+    // Draw content
+    box(content_win_, 0, 0);
+    if (window_state_.show_pseudo) {
+        mvwprintw(content_win_, 0, 2, " Pseudocode ");
+        pseudo_view_->draw(content_win_);
+    } else if (window_state_.show_disasm) {
+        mvwprintw(content_win_, 0, 2, " Disassembly ");
+        disasm_view_->draw(content_win_);
+    }
+    
+    // Draw command center
+    drawCommandCenter();
+    
+    // Draw status bar
+    drawStatusBar();
+    
+    // Refresh all windows
+    wrefresh(menu_win_);
+    wrefresh(func_win_);
+    wrefresh(content_win_);
+    wrefresh(cmd_win_);
+    wrefresh(status_win_);
+    
+    // Position cursor if in command mode
+    if (command_focused_) {
+        int cmd_y = height_ - 10;
+        wmove(cmd_win_, 8, 3 + command_input_.length());
+        wrefresh(cmd_win_);
+    }
+}
+
+void App::drawCommandCenter() {
+    box(cmd_win_, 0, 0);
+    mvwprintw(cmd_win_, 0, 2, " Command Center ");
+    
+    int win_height, win_width;
+    getmaxyx(cmd_win_, win_height, win_width);
+    
+    // Draw output (last few lines)
+    int visible_lines = win_height - 3;
+    int start = std::max(0, static_cast<int>(command_output_.size()) - visible_lines);
+    
+    for (int i = 0; i < visible_lines && start + i < static_cast<int>(command_output_.size()); i++) {
+        std::string line = command_output_[start + i];
+        if (line.length() > static_cast<size_t>(win_width - 4)) {
+            line = line.substr(0, win_width - 7) + "...";
+        }
+        mvwprintw(cmd_win_, 1 + i, 2, "%s", line.c_str());
+    }
+    
+    // Draw input line
+    wattron(cmd_win_, A_BOLD);
+    mvwprintw(cmd_win_, win_height - 2, 1, "> ");
+    wattroff(cmd_win_, A_BOLD);
+    
+    if (command_focused_) {
+        wattron(cmd_win_, A_REVERSE);
+    }
+    mvwprintw(cmd_win_, win_height - 2, 3, "%-*s", win_width - 5, command_input_.c_str());
+    if (command_focused_) {
+        wattroff(cmd_win_, A_REVERSE);
+    }
+}
+
+void App::drawStatusBar() {
+    wattron(status_win_, A_REVERSE);
+    mvwhline(status_win_, 0, 0, ' ', width_);
+    mvwprintw(status_win_, 0, 1, " %s ", status_.c_str());
+    mvwprintw(status_win_, 0, width_ - 40, " F1-F4:Menus | Tab:Focus | q:Quit ");
+    wattroff(status_win_, A_REVERSE);
 }
 
 bool App::loadNsoFile(const std::string& path) {
-    // Show loading overlay
-    loading_ = true;
-    loading_message_ = "Loading NSO File";
-    loading_log_.clear();
-    loading_log_.push_back("> load " + path);
-    loading_log_.push_back("Reading file...");
+    appendOutput("> load " + path);
     setStatus("Loading " + path + "...");
-    
-    // Note: This runs synchronously, so overlay won't show until after
-    // For true async loading, would need background thread
+    refreshAll();
     
     if (!analyzer_.loadNso(path)) {
-        loading_log_.push_back("ERROR: Failed to load NSO file");
-        loading_ = false;
+        appendOutput("ERROR: Failed to load NSO file");
         setStatus("Failed to load NSO file");
-        appendOutput("Failed to load: " + path);
         return false;
     }
     
     file_loaded_ = true;
-    loading_log_.push_back("NSO loaded successfully");
-    loading_log_.push_back("Build ID: " + analyzer_.getNso().getBuildId());
-    loading_log_.push_back("Analyzing functions...");
+    appendOutput("NSO loaded successfully");
+    appendOutput("Build ID: " + analyzer_.getNso().getBuildId());
+    appendOutput("Analyzing...");
     setStatus("Analyzing...");
+    refreshAll();
     
     analyzer_.analyze();
     analyzed_ = true;
@@ -311,36 +345,30 @@ bool App::loadNsoFile(const std::string& path) {
     auto& funcs = analyzer_.getFunctionFinder().getFunctions();
     auto& strs = analyzer_.getStringTable().getStrings();
     
-    loading_log_.push_back("Found " + std::to_string(funcs.size()) + " functions");
-    loading_log_.push_back("Found " + std::to_string(strs.size()) + " strings");
-    loading_log_.push_back("Analysis complete!");
-    
-    function_view_->refresh();
-    
-    // Log to command center
-    appendOutput("> load " + path);
-    appendOutput("Build ID: " + analyzer_.getNso().getBuildId());
-    appendOutput("Functions: " + std::to_string(funcs.size()));
-    appendOutput("Strings: " + std::to_string(strs.size()));
+    appendOutput("Found " + std::to_string(funcs.size()) + " functions");
+    appendOutput("Found " + std::to_string(strs.size()) + " strings");
     appendOutput("Ready.");
     
-    loading_ = false;
+    function_view_->refresh();
     setStatus("Loaded: " + std::to_string(funcs.size()) + " functions");
     
     return true;
 }
 
 bool App::loadProgress(const std::string& build_id) {
-    setStatus("Loading progress for " + build_id + "...");
+    appendOutput("> load progress " + build_id);
+    setStatus("Loading progress...");
     
     if (!progress_mgr_.loadProgress(analyzer_, build_id)) {
-        setStatus("Failed to load progress: " + progress_mgr_.getError());
+        appendOutput("ERROR: " + progress_mgr_.getError());
+        setStatus("Failed to load progress");
         return false;
     }
     
     file_loaded_ = true;
     analyzed_ = true;
     function_view_->refresh();
+    appendOutput("Progress loaded");
     setStatus("Loaded progress for " + build_id);
     
     return true;
@@ -348,17 +376,17 @@ bool App::loadProgress(const std::string& build_id) {
 
 bool App::saveProgress() {
     if (!file_loaded_ || !analyzed_) {
-        setStatus("Nothing to save");
+        appendOutput("Nothing to save");
         return false;
     }
     
-    setStatus("Saving progress...");
-    
+    appendOutput("> save");
     if (!progress_mgr_.saveProgress(analyzer_)) {
-        setStatus("Failed to save: " + progress_mgr_.getError());
+        appendOutput("ERROR: " + progress_mgr_.getError());
         return false;
     }
     
+    appendOutput("Progress saved");
     setStatus("Progress saved");
     return true;
 }
@@ -373,357 +401,100 @@ void App::setStatus(const std::string& msg) {
     status_ = msg;
 }
 
-void App::quit() {
-    running_ = false;
-    screen_.Exit();
+void App::appendOutput(const std::string& text) {
+    std::istringstream stream(text);
+    std::string line;
+    while (std::getline(stream, line)) {
+        command_output_.push_back(line);
+    }
+    while (command_output_.size() > 500) {
+        command_output_.erase(command_output_.begin());
+    }
 }
 
-Element App::renderCommandCenter() {
-    Elements output_lines;
+void App::executeCommand(const std::string& cmd) {
+    if (cmd.empty()) return;
     
-    // Show output (last N lines based on scroll)
-    int visible_lines = 6;
-    int start = std::max(0, std::min(output_scroll_, 
-                 static_cast<int>(command_output_.size()) - visible_lines));
-    int end = std::min(start + visible_lines, static_cast<int>(command_output_.size()));
+    appendOutput("> " + cmd);
     
-    for (int i = start; i < end; i++) {
-        Element line = text(command_output_[i]);
-        if (command_output_[i].substr(0, 2) == "> ") {
-            line = line | bold;
-        }
-        output_lines.push_back(line);
+    std::istringstream iss(cmd);
+    std::string command;
+    iss >> command;
+    std::transform(command.begin(), command.end(), command.begin(), ::tolower);
+    
+    if (command == "help" || command == "h" || command == "?") {
+        appendOutput("Commands:");
+        appendOutput("  load <path>        Load NSO file");
+        appendOutput("  save               Save progress");
+        appendOutput("  goto <addr>        Go to address");
+        appendOutput("  info               Show file info");
+        appendOutput("  clear              Clear output");
+        appendOutput("  quit               Exit");
+        return;
     }
     
-    // Pad if needed
-    while (output_lines.size() < static_cast<size_t>(visible_lines)) {
-        output_lines.push_back(text(""));
+    if (command == "clear" || command == "cls") {
+        command_output_.clear();
+        return;
     }
     
-    // Input line
-    Element input_line = hbox({
-        text("> ") | bold | color(Color::Green),
-        text(command_input_) | flex,
-        text("_") | (command_focused_ ? blink : dim),
-    });
-    
-    if (command_focused_) {
-        input_line = input_line | inverted;
+    if (command == "quit" || command == "exit" || command == "q") {
+        running_ = false;
+        return;
     }
     
-    return vbox({
-        text(" Command Center ") | bold | center,
-        separator(),
-        vbox(output_lines) | frame,
-        separator(),
-        input_line,
-    }) | border | size(HEIGHT, EQUAL, 12);
-}
-
-Component App::createMainComponent() {
-    auto toolbar_component = toolbar_->getComponent();
-    auto func_component = function_view_->getComponent();
-    auto pseudo_component = pseudo_view_->getComponent();
-    auto disasm_component = disasm_view_->getComponent();
-    auto search_component = search_dialog_->getComponent();
+    if (command == "load") {
+        std::string path;
+        std::getline(iss >> std::ws, path);
+        if (path.empty()) {
+            appendOutput("Usage: load <path>");
+            return;
+        }
+        loadNsoFile(path);
+        return;
+    }
     
-    // Container for all focusable components
-    auto container = Container::Vertical({
-        toolbar_component,
-        Container::Horizontal({
-            func_component,
-            Container::Tab({
-                pseudo_component,
-                disasm_component,
-            }, nullptr),
-        }),
-    });
+    if (command == "save") {
+        saveProgress();
+        return;
+    }
     
-    // Main renderer - toolbar component handles all its rendering internally
-    auto renderer = Renderer(container, [&, toolbar_component] {
-        Elements main_content;
-        
-        // Toolbar - renders menu bar + dropdown/dialogs all together
-        main_content.push_back(toolbar_component->Render());
-        main_content.push_back(separator());
-        
-        // Main area
-        Elements panels;
-        
-        // Functions panel
-        if (window_state_.show_functions) {
-            panels.push_back(
-                vbox({
-                    text(" Functions ") | bold | center,
-                    separator(),
-                    function_view_->render() | flex,
-                }) | border | size(WIDTH, EQUAL, 35)
-            );
+    if (command == "info") {
+        if (!file_loaded_) {
+            appendOutput("No file loaded");
+            return;
         }
-        
-        // Right panel (pseudo or disasm)
-        Elements right_content;
-        
-        if (window_state_.show_pseudo) {
-            right_content.push_back(
-                vbox({
-                    text(" Pseudocode ") | bold | center,
-                    separator(),
-                    pseudo_view_->render() | flex,
-                }) | border | flex
-            );
-        }
-        
-        if (window_state_.show_disasm) {
-            right_content.push_back(
-                vbox({
-                    text(" Disassembly ") | bold | center,
-                    separator(),
-                    disasm_view_->render() | flex,
-                }) | border | flex
-            );
-        }
-        
-        if (!right_content.empty()) {
-            if (right_content.size() == 1) {
-                panels.push_back(right_content[0]);
-            } else {
-                panels.push_back(vbox(right_content) | flex);
-            }
-        }
-        
-        if (!panels.empty()) {
-            main_content.push_back(hbox(panels) | flex);
-        }
-        
-        // Command Center at the bottom
-        main_content.push_back(renderCommandCenter());
-        
-        // Status bar
-        main_content.push_back(
-            hbox({
-                text(" " + status_ + " ") | flex,
-                separator(),
-                text(" F1-F4:Menus | : Command | Ctrl+Q:Quit "),
-            })
-        );
-        
-        Element main = vbox(main_content);
-        
-        // Overlay: toolbar dropdown/dialogs
-        if (toolbar_->hasActiveDialog()) {
-            Element toolbar_overlay = toolbar_->render();
-            // Wrap in a full-screen container for proper positioning
-            Element overlay_container = toolbar_overlay | flex;
-            main = dbox({
-                main,
-                overlay_container,
-            });
-        }
-        
-        // Overlay: search dialog
-        if (search_dialog_->isVisible()) {
-            Element search_overlay = search_dialog_->render() | clear_under;
-            Element overlay_container = vbox({
-                filler(),
-                hbox({
-                    filler(),
-                    search_overlay,
-                    filler(),
-                }),
-                filler(),
-            });
-            main = dbox({
-                main,
-                overlay_container,
-            });
-        }
-        
-        // Overlay: loading indicator
-        if (loading_) {
-            Elements log_lines;
-            // Show last 10 log lines
-            int start = std::max(0, static_cast<int>(loading_log_.size()) - 10);
-            for (int i = start; i < static_cast<int>(loading_log_.size()); i++) {
-                log_lines.push_back(text(loading_log_[i]));
-            }
-            
-            Element loading_box = vbox({
-                text(" " + loading_message_ + " ") | bold | center,
-                separator(),
-                vbox(log_lines) | size(WIDTH, EQUAL, 50),
-                separator(),
-                text(" Please wait... ") | dim | center | blink,
-            }) | border | bgcolor(Color::Black) | clear_under;
-            
-            // Center the loading box
-            Element overlay_container = vbox({
-                filler(),
-                hbox({
-                    filler(),
-                    loading_box,
-                    filler(),
-                }),
-                filler(),
-            });
-            
-            main = dbox({
-                main,
-                overlay_container,
-            });
-        }
-        
-        return main;
-    });
+        appendOutput("Build ID: " + analyzer_.getNso().getBuildId());
+        appendOutput("Functions: " + std::to_string(analyzer_.getFunctionFinder().getFunctions().size()));
+        appendOutput("Strings: " + std::to_string(analyzer_.getStringTable().getStrings().size()));
+        return;
+    }
     
-    // Handle global keyboard events
-    return CatchEvent(renderer, [&](Event event) {
-        // IMPORTANT: If toolbar has an active dialog, let it handle ALL events first
-        if (toolbar_->hasActiveDialog()) {
-            // Forward to toolbar's component - return false to let it propagate
-            return false;
+    if (command == "goto" || command == "go" || command == "g") {
+        std::string addr_str;
+        iss >> addr_str;
+        if (addr_str.empty()) {
+            appendOutput("Usage: goto <address>");
+            return;
         }
         
-        // Handle command center input when focused
-        if (command_focused_) {
-            // Text input
-            if (event.is_character()) {
-                command_input_ += event.character();
-                return true;
-            }
-            
-            // Backspace
-            if (event == Event::Backspace && !command_input_.empty()) {
-                command_input_.pop_back();
-                return true;
-            }
-            
-            // Enter - execute command
-            if (event == Event::Return) {
-                executeCommand(command_input_);
-                command_input_.clear();
-                return true;
-            }
-            
-            // History navigation
-            if (event == Event::ArrowUp && !command_history_.empty()) {
-                if (history_index_ < 0) {
-                    history_index_ = command_history_.size() - 1;
-                } else if (history_index_ > 0) {
-                    history_index_--;
-                }
-                command_input_ = command_history_[history_index_];
-                return true;
-            }
-            
-            if (event == Event::ArrowDown && !command_history_.empty()) {
-                if (history_index_ >= 0) {
-                    history_index_++;
-                    if (history_index_ >= static_cast<int>(command_history_.size())) {
-                        history_index_ = -1;
-                        command_input_.clear();
-                    } else {
-                        command_input_ = command_history_[history_index_];
-                    }
-                }
-                return true;
-            }
-            
-            // Scroll output
-            if (event == Event::PageUp) {
-                output_scroll_ = std::max(0, output_scroll_ - 3);
-                return true;
-            }
-            if (event == Event::PageDown) {
-                output_scroll_ = std::min(
-                    static_cast<int>(command_output_.size()) - 6,
-                    output_scroll_ + 3);
-                return true;
-            }
-            
-            // Escape to unfocus
-            if (event == Event::Escape) {
-                command_focused_ = false;
-                return true;
-            }
-            
-            // Tab to unfocus (switch to panels)
-            if (event == Event::Tab) {
-                command_focused_ = false;
-                return true;
-            }
-            
-            return true;  // Consume all other events when focused
+        uint64_t addr = 0;
+        if (addr_str.substr(0, 2) == "0x") {
+            std::stringstream ss;
+            ss << std::hex << addr_str.substr(2);
+            ss >> addr;
+        } else {
+            addr = std::stoull(addr_str);
         }
         
-        // ':' key focuses command center (vim-like)
-        if (event == Event::Character(':')) {
-            command_focused_ = true;
-            command_input_.clear();
-            return true;
-        }
-        
-        // '/' also focuses for search-like input
-        if (event == Event::Character('/')) {
-            command_focused_ = true;
-            command_input_ = "strings ";
-            return true;
-        }
-        
-        // Ctrl+Q to quit
-        if (event.input() == "\x11") {
-            quit();
-            return true;
-        }
-        
-        // Search shortcuts (when not in command center)
-        if (event.input() == "\x13") {  // Ctrl+S - Search Strings
-            search_dialog_->show(SearchType::Strings);
-            return true;
-        }
-        if (event.input() == "\x01") {  // Ctrl+A - Search Assembly
-            search_dialog_->show(SearchType::Assembly);
-            return true;
-        }
-        if (event.input() == "\x08") {  // Ctrl+H - Search Hex
-            search_dialog_->show(SearchType::RawHex);
-            return true;
-        }
-        if (event.input() == "\x10") {  // Ctrl+P - Search Pseudocode
-            search_dialog_->show(SearchType::Pseudocode);
-            return true;
-        }
-        
-        // Escape closes dialogs
-        if (event == Event::Escape) {
-            if (search_dialog_->isVisible()) {
-                search_dialog_->hide();
-                return true;
-            }
-        }
-        
-        // Let F1-F4 through to toolbar for menu access
-        if (event == Event::F1 || event == Event::F2 || 
-            event == Event::F3 || event == Event::F4) {
-            return false;  // Don't consume, let toolbar handle
-        }
-        
-        // Mouse click to focus command center (bottom area of screen)
-        if (event.is_mouse() && event.mouse().button == Mouse::Left &&
-            event.mouse().motion == Mouse::Pressed) {
-            // Command center is roughly the bottom 12 lines
-            // We use screen dimensions if available, otherwise estimate
-            int y = event.mouse().y;
-            // If click is in lower portion, focus command center
-            // This is approximate - the command center takes about 12 lines at bottom
-            if (y >= 15) {  // Rough estimate for command center area
-                command_focused_ = true;
-                return true;
-            }
-        }
-        
-        return false;
-    });
+        setSelectedFunction(addr);
+        std::stringstream ss;
+        ss << "Jumped to 0x" << std::hex << addr;
+        appendOutput(ss.str());
+        return;
+    }
+    
+    appendOutput("Unknown command. Type 'help' for commands.");
 }
 
 } // namespace gui

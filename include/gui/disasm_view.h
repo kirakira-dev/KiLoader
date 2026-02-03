@@ -1,41 +1,40 @@
 #pragma once
 
+#include <ncurses.h>
 #include <string>
 #include <vector>
-#include "ftxui/component/component.hpp"
-#include "disassembler.h"
+#include <cstdint>
 
 namespace kiloader {
 namespace gui {
 
 class App;
 
-// Disassembly view
+struct DisasmLine {
+    uint64_t address;
+    std::string bytes;
+    std::string mnemonic;
+    std::string operands;
+};
+
 class DisasmView {
 public:
     DisasmView(App& app);
+    ~DisasmView() = default;
     
-    // Get FTXUI component
-    ftxui::Component getComponent();
-    
-    // Render the view
-    ftxui::Element render();
-    
-    // Set function/address to display
+    void draw(WINDOW* win);
+    void handleKey(int ch);
     void setFunction(uint64_t addr);
-    void setAddress(uint64_t addr, size_t count = 100);
     
 private:
+    void disassemble();
+    
     App& app_;
     
-    uint64_t current_address_ = 0;
-    std::vector<Instruction> instructions_;
-    
+    uint64_t current_addr_ = 0;
+    std::vector<DisasmLine> lines_;
     int scroll_offset_ = 0;
-    int selected_line_ = 0;
-    
-    void refresh();
-    ftxui::Element renderInstruction(const Instruction& insn, bool selected);
+    int selected_ = 0;
 };
 
 } // namespace gui

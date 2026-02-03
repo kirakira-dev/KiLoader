@@ -1,10 +1,12 @@
 #pragma once
 
+#include <ncurses.h>
+#include <menu.h>
+#include <panel.h>
 #include <memory>
 #include <string>
+#include <vector>
 #include <functional>
-#include "ftxui/component/component.hpp"
-#include "ftxui/component/screen_interactive.hpp"
 #include "analyzer.h"
 #include "progress_manager.h"
 
@@ -22,7 +24,6 @@ class SearchDialog;
 struct UISettings {
     bool dark_theme = true;
     bool show_line_numbers = true;
-    int font_size = 1;  // 0=small, 1=normal, 2=large
 };
 
 // Window visibility
@@ -70,14 +71,27 @@ public:
     void focusCommandCenter() { command_focused_ = true; }
     
     // Quit
-    void quit();
+    void quit() { running_ = false; }
+    
+    // Get windows
+    WINDOW* getMainWin() { return main_win_; }
+    int getWidth() const { return width_; }
+    int getHeight() const { return height_; }
+    
+    // Refresh all
+    void refreshAll();
     
 private:
-    ftxui::Component createMainComponent();
-    ftxui::Component createLayout();
-    ftxui::Element renderCommandCenter();
+    void initNcurses();
+    void cleanupNcurses();
+    void createWindows();
+    void destroyWindows();
+    void handleResize();
+    void drawLayout();
+    void drawStatusBar();
+    void drawCommandCenter();
+    void handleInput(int ch);
     
-    ftxui::ScreenInteractive screen_;
     Analyzer analyzer_;
     ProgressManager progress_mgr_;
     
@@ -85,15 +99,10 @@ private:
     WindowState window_state_;
     
     uint64_t selected_function_ = 0;
-    std::string status_ = "Ready";
+    std::string status_ = "Ready - Press F1 for Load menu";
     bool running_ = true;
     bool file_loaded_ = false;
     bool analyzed_ = false;
-    
-    // Loading overlay
-    bool loading_ = false;
-    std::string loading_message_;
-    std::vector<std::string> loading_log_;
     
     // Command center
     std::string command_input_;
@@ -103,12 +112,26 @@ private:
     bool command_focused_ = false;
     int output_scroll_ = 0;
     
+    // Windows
+    WINDOW* main_win_ = nullptr;
+    WINDOW* menu_win_ = nullptr;
+    WINDOW* func_win_ = nullptr;
+    WINDOW* content_win_ = nullptr;
+    WINDOW* cmd_win_ = nullptr;
+    WINDOW* status_win_ = nullptr;
+    
+    int width_ = 0;
+    int height_ = 0;
+    
     // Components
-    std::shared_ptr<Toolbar> toolbar_;
-    std::shared_ptr<FunctionView> function_view_;
-    std::shared_ptr<PseudoView> pseudo_view_;
-    std::shared_ptr<DisasmView> disasm_view_;
-    std::shared_ptr<SearchDialog> search_dialog_;
+    std::unique_ptr<Toolbar> toolbar_;
+    std::unique_ptr<FunctionView> function_view_;
+    std::unique_ptr<PseudoView> pseudo_view_;
+    std::unique_ptr<DisasmView> disasm_view_;
+    std::unique_ptr<SearchDialog> search_dialog_;
+    
+    // Focus state: 0=menu, 1=functions, 2=content, 3=command
+    int focus_ = 1;
 };
 
 } // namespace gui

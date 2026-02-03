@@ -1,63 +1,50 @@
 #pragma once
 
+#include <ncurses.h>
+#include <menu.h>
 #include <string>
-#include <functional>
 #include <vector>
-#include "ftxui/component/component.hpp"
+#include <functional>
 
 namespace kiloader {
 namespace gui {
 
 class App;
 
-// Menu item
 struct MenuItem {
     std::string label;
     std::function<void()> action;
-    std::string shortcut;
-    bool enabled = true;
 };
 
-// Menu
 struct Menu {
     std::string label;
     std::vector<MenuItem> items;
 };
 
-// Toolbar with menus
 class Toolbar {
 public:
     Toolbar(App& app);
+    ~Toolbar();
     
-    // Get FTXUI component
-    ftxui::Component getComponent();
+    void draw(WINDOW* win);
+    void handleKey(int ch);
     
-    // Render the toolbar element
-    ftxui::Element render();
-    
-    // Show file browser dialog
-    void showLoadDialog();
-    void showLoadProgressDialog();
-    
-    // Check if toolbar has an active dialog
-    bool hasActiveDialog() const { return show_file_dialog_ || show_progress_dialog_ || menu_open_; }
+    bool isMenuOpen() const { return menu_open_; }
     
 private:
     void setupMenus();
+    void showDropdown(int menu_idx);
+    void hideDropdown();
+    void executeItem();
     
     App& app_;
     std::vector<Menu> menus_;
     
     int selected_menu_ = 0;
-    bool menu_open_ = false;
     int selected_item_ = 0;
+    bool menu_open_ = false;
     
-    // File input
-    std::string file_input_;
-    bool show_file_dialog_ = false;
-    bool show_progress_dialog_ = false;
-    int selected_progress_ = 0;
-    std::vector<std::string> progress_list_;
+    WINDOW* dropdown_win_ = nullptr;
 };
 
 } // namespace gui

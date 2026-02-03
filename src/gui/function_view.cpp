@@ -1,10 +1,6 @@
 #include "gui/function_view.h"
 #include "gui/app.h"
 
-#include "ftxui/component/component.hpp"
-#include "ftxui/component/event.hpp"
-#include "ftxui/dom/elements.hpp"
-
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
@@ -12,170 +8,147 @@
 namespace kiloader {
 namespace gui {
 
-using namespace ftxui;
-
-FunctionView::FunctionView(App& app) : app_(app) {}
+FunctionView::FunctionView(App& app) : app_(app) {
+}
 
 void FunctionView::refresh() {
     functions_.clear();
-    filtered_indices_.clear();
     
     auto& funcs = app_.getAnalyzer().getFunctionFinder().getFunctions();
-    
     for (const auto& [addr, func] : funcs) {
         functions_.push_back({addr, func.name});
     }
     
-    applyFilter();
+    // Sort by address
+    std::sort(functions_.begin(), functions_.end());
+    
     selected_ = 0;
     scroll_offset_ = 0;
 }
 
-void FunctionView::setFilter(const std::string& filter) {
-    filter_ = filter;
-    applyFilter();
-    selected_ = 0;
-    scroll_offset_ = 0;
-}
-
-void FunctionView::applyFilter() {
-    filtered_indices_.clear();
+void FunctionView::draw(WINDOW* win) {
+    int height, width;
+    getmaxyx(win, height, width);
     
-    if (filter_.empty()) {
-        for (size_t i = 0; i < functions_.size(); i++) {
-            filtered_indices_.push_back(i);
-        }
-    } else {
-        std::string lower_filter = filter_;
-        std::transform(lower_filter.begin(), lower_filter.end(), 
-                      lower_filter.begin(), ::tolower);
-        
-        for (size_t i = 0; i < functions_.size(); i++) {
-            std::string lower_name = functions_[i].second;
-            std::transform(lower_name.begin(), lower_name.end(), 
-                          lower_name.begin(), ::tolower);
-            
-            if (lower_name.find(lower_filter) != std::string::npos) {
-                filtered_indices_.push_back(i);
-            }
-        }
-    }
-}
-
-uint64_t FunctionView::getSelectedAddress() const {
-    if (filtered_indices_.empty()) return 0;
-    if (selected_ >= static_cast<int>(filtered_indices_.size())) return 0;
-    return functions_[filtered_indices_[selected_]].first;
-}
-
-Component FunctionView::getComponent() {
-    return CatchEvent(Renderer([this]{ return render(); }), [this](Event event) {
-        if (filtered_indices_.empty()) return false;
-        
-        int visible_count = 20;  // Approximate visible lines
-        
-        if (event == Event::ArrowDown) {
-            if (selected_ < static_cast<int>(filtered_indices_.size()) - 1) {
-                selected_++;
-                // Scroll if needed
-                if (selected_ >= scroll_offset_ + visible_count) {
-                    scroll_offset_ = selected_ - visible_count + 1;
-                }
-                app_.setSelectedFunction(getSelectedAddress());
-            }
-            return true;
-        }
-        
-        if (event == Event::ArrowUp) {
-            if (selected_ > 0) {
-                selected_--;
-                if (selected_ < scroll_offset_) {
-                    scroll_offset_ = selected_;
-                }
-                app_.setSelectedFunction(getSelectedAddress());
-            }
-            return true;
-        }
-        
-        if (event == Event::PageDown) {
-            selected_ = std::min(selected_ + visible_count, 
-                                static_cast<int>(filtered_indices_.size()) - 1);
-            scroll_offset_ = std::max(0, selected_ - visible_count + 1);
-            app_.setSelectedFunction(getSelectedAddress());
-            return true;
-        }
-        
-        if (event == Event::PageUp) {
-            selected_ = std::max(selected_ - visible_count, 0);
-            scroll_offset_ = selected_;
-            app_.setSelectedFunction(getSelectedAddress());
-            return true;
-        }
-        
-        if (event == Event::Home) {
-            selected_ = 0;
-            scroll_offset_ = 0;
-            app_.setSelectedFunction(getSelectedAddress());
-            return true;
-        }
-        
-        if (event == Event::End) {
-            selected_ = static_cast<int>(filtered_indices_.size()) - 1;
-            scroll_offset_ = std::max(0, selected_ - visible_count + 1);
-            app_.setSelectedFunction(getSelectedAddress());
-            return true;
-        }
-        
-        if (event == Event::Return) {
-            app_.setSelectedFunction(getSelectedAddress());
-            return true;
-        }
-        
-        return false;
-    });
-}
-
-Element FunctionView::render() {
-    if (functions_.empty()) {
-        return text(" No functions loaded ") | dim | center;
+    int visible_height = height - 2;  // Account for border
+    int visible_width = width - 4;
+    
+    // Ensure scroll offset is valid
+    if (selected_ < scroll_offset_) {
+        scroll_offset_ = selected_;
+    } else if (selected_ >= scroll_offset_ + visible_height) {
+        scroll_offset_ = selected_ - visible_height + 1;
     }
     
-    Elements items;
-    
-    int visible_count = 25;
-    int end = std::min(scroll_offset_ + visible_count, 
-                       static_cast<int>(filtered_indices_.size()));
-    
-    for (int i = scroll_offset_; i < end; i++) {
-        size_t idx = filtered_indices_[i];
+    // Draw functions
+    for (int i = 0; i < visible_height && scroll_offset_ + i < static_cast<int>(functions_.size()); i++) {
+        int idx = scroll_offset_ + i;
         auto& [addr, name] = functions_[idx];
         
         std::stringstream ss;
-        ss << std::hex << std::setfill('0') << std::setw(10) << addr;
+        ss << std::hex << std::setw(10) << std::setfill('0') << addr;
+        std::string addr_str = ss.str();
         
-        Element line = hbox({
-            text(ss.str()) | dim,
-            text(" "),
-            text(name) | flex,
-        });
-        
-        if (i == selected_) {
-            line = line | inverted | focus;
+        std::string display = name;
+        if (display.length() > static_cast<size_t>(visible_width - 12)) {
+            display = display.substr(0, visible_width - 15) + "...";
         }
         
-        items.push_back(line);
+        if (idx == selected_) {
+            wattron(win, A_REVERSE);
+        }
+        
+        mvwprintw(win, 1 + i, 2, "%-*s", visible_width, display.c_str());
+        
+        if (idx == selected_) {
+            wattroff(win, A_REVERSE);
+        }
     }
     
-    // Scrollbar indicator
-    if (filtered_indices_.size() > static_cast<size_t>(visible_count)) {
-        int total = filtered_indices_.size();
-        int pos = scroll_offset_ * 100 / total;
-        items.push_back(separator());
-        items.push_back(text(" [" + std::to_string(selected_ + 1) + "/" + 
-                            std::to_string(total) + "] ") | dim);
+    // Draw scroll indicator
+    if (!functions_.empty()) {
+        int scroll_height = std::max(1, visible_height * visible_height / static_cast<int>(functions_.size()));
+        int scroll_pos = functions_.empty() ? 0 : 
+            scroll_offset_ * (visible_height - scroll_height) / std::max(1, static_cast<int>(functions_.size()) - visible_height);
+        
+        for (int i = 0; i < visible_height; i++) {
+            if (i >= scroll_pos && i < scroll_pos + scroll_height) {
+                mvwaddch(win, 1 + i, width - 2, ACS_CKBOARD);
+            } else {
+                mvwaddch(win, 1 + i, width - 2, ACS_VLINE);
+            }
+        }
     }
     
-    return vbox(items) | frame | flex;
+    // Show count
+    std::stringstream ss;
+    ss << " " << functions_.size() << " funcs ";
+    mvwprintw(win, height - 1, width - ss.str().length() - 2, "%s", ss.str().c_str());
+}
+
+void FunctionView::handleKey(int ch) {
+    if (functions_.empty()) return;
+    
+    if (ch == KEY_DOWN || ch == 'j') {
+        if (selected_ < static_cast<int>(functions_.size()) - 1) {
+            selected_++;
+            app_.setSelectedFunction(functions_[selected_].first);
+        }
+    } else if (ch == KEY_UP || ch == 'k') {
+        if (selected_ > 0) {
+            selected_--;
+            app_.setSelectedFunction(functions_[selected_].first);
+        }
+    } else if (ch == KEY_PPAGE) {  // Page Up
+        int height = 20;  // Approximate visible height
+        selected_ = std::max(0, selected_ - height);
+        app_.setSelectedFunction(functions_[selected_].first);
+    } else if (ch == KEY_NPAGE) {  // Page Down
+        int height = 20;
+        selected_ = std::min(static_cast<int>(functions_.size()) - 1, selected_ + height);
+        app_.setSelectedFunction(functions_[selected_].first);
+    } else if (ch == KEY_HOME || ch == 'g') {
+        selected_ = 0;
+        scroll_offset_ = 0;
+        if (!functions_.empty()) {
+            app_.setSelectedFunction(functions_[selected_].first);
+        }
+    } else if (ch == KEY_END || ch == 'G') {
+        selected_ = functions_.size() - 1;
+        if (!functions_.empty()) {
+            app_.setSelectedFunction(functions_[selected_].first);
+        }
+    } else if (ch == '\n' || ch == KEY_ENTER) {
+        if (!functions_.empty()) {
+            app_.setSelectedFunction(functions_[selected_].first);
+        }
+    }
+}
+
+void FunctionView::handleMouse(MEVENT& event) {
+    if (event.bstate & BUTTON1_CLICKED || event.bstate & BUTTON1_PRESSED) {
+        int clicked_idx = scroll_offset_ + event.y - 2;  // Account for border and offset
+        if (clicked_idx >= 0 && clicked_idx < static_cast<int>(functions_.size())) {
+            selected_ = clicked_idx;
+            app_.setSelectedFunction(functions_[selected_].first);
+        }
+    }
+#ifdef BUTTON4_PRESSED
+    else if (event.bstate & BUTTON4_PRESSED) {  // Scroll up
+        if (selected_ > 0) {
+            selected_--;
+            app_.setSelectedFunction(functions_[selected_].first);
+        }
+    }
+#endif
+#ifdef BUTTON5_PRESSED
+    else if (event.bstate & BUTTON5_PRESSED) {  // Scroll down
+        if (selected_ < static_cast<int>(functions_.size()) - 1) {
+            selected_++;
+            app_.setSelectedFunction(functions_[selected_].first);
+        }
+    }
+#endif
 }
 
 } // namespace gui

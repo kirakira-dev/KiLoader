@@ -8,14 +8,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Threading support
 find_package(Threads REQUIRED)
 
-# Fetch FTXUI for terminal GUI
-include(FetchContent)
-FetchContent_Declare(
-    ftxui
-    GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI.git
-    GIT_TAG v5.0.0
-)
-FetchContent_MakeAvailable(ftxui)
+# Find ncurses
+find_package(Curses REQUIRED)
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
@@ -28,6 +22,7 @@ include_directories(
     /opt/homebrew/include
     ${CAPSTONE_INCLUDE_DIRS}
     ${LZ4_INCLUDE_DIRS}
+    ${CURSES_INCLUDE_DIR}
 )
 
 # Library directories
@@ -66,9 +61,9 @@ target_link_libraries(kiloader
     ${CAPSTONE_LIBRARIES}
     ${LZ4_LIBRARIES}
     Threads::Threads
-    ftxui::screen
-    ftxui::dom
-    ftxui::component
+    ${CURSES_LIBRARIES}
+    menu
+    panel
 )
 
 # Install
