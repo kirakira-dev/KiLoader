@@ -193,11 +193,37 @@ void App::handleInput(int ch) {
         if (getmouse(&event) == OK) {
             // Determine which window was clicked
             if (event.y == 0) {
-                // Menu bar
+                // Menu bar - detect which menu was clicked
                 focus_ = 0;
+                int x = event.x;
+                
+                // KILOADER takes 0-10, then menus start at 11
+                if (x >= 11 && x < 17) {  // "Load" at position 11-16
+                    toolbar_->handleKey(KEY_F(1));
+                } else if (x >= 17 && x < 25) {  // "Window" at position 17-24
+                    toolbar_->handleKey(KEY_F(2));
+                } else if (x >= 25 && x < 32) {  // "Tools" at position 25-31
+                    toolbar_->handleKey(KEY_F(3));
+                } else if (x >= 32 && x < 36) {  // "UI" at position 32-35
+                    toolbar_->handleKey(KEY_F(4));
+                }
+            } else if (toolbar_->isMenuOpen()) {
+                // Click while menu is open - check if on dropdown
+                int menu_y = event.y - 1;  // Dropdown starts at y=1
+                if (menu_y >= 0 && menu_y < 10) {  // Reasonable dropdown height
+                    // Simulate arrow down to select, then enter
+                    for (int i = 0; i < menu_y; i++) {
+                        toolbar_->handleKey(KEY_DOWN);
+                    }
+                    toolbar_->handleKey('\n');
+                } else {
+                    // Click outside dropdown - close it
+                    toolbar_->handleKey(27);  // ESC
+                }
             } else if (event.y < height_ - 11) {
                 if (event.x < 35) {
                     focus_ = 1;  // Functions
+                    function_view_->handleMouse(event);
                 } else {
                     focus_ = 2;  // Content
                 }
@@ -205,11 +231,6 @@ void App::handleInput(int ch) {
                 focus_ = 3;  // Command
                 command_focused_ = true;
                 curs_set(1);
-            }
-            
-            // Forward to appropriate component
-            if (focus_ == 1) {
-                function_view_->handleMouse(event);
             }
         }
         return;
